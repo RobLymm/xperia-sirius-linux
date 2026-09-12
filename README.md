@@ -31,7 +31,8 @@ apply to all four devices, not only the Z2.
 | Modem | Boots, then stalls during initialisation | `docs/modem.md` |
 | Suspend and resume | Not working. Resume loses Wi-Fi and touch | `docs/known-problems.md` |
 | NFC | Not tested. NXP PN547; mainline driver exists, node written | `docs/nfc.md` |
-| FM radio, camera | Not attempted; both need drivers that do not exist upstream | `docs/remaining-hardware.md` |
+| Camera | Not attempted. ISP support exists for msm8974 elsewhere; the sensors need drivers | `docs/camera.md` |
+| FM radio | Not attempted. Nothing exists anywhere for the WCN3680 tuner | `docs/remaining-hardware.md` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually

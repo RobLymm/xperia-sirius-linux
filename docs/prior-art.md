@@ -63,6 +63,12 @@ read off it directly:
   that implies is not in the 6.16 branch of the fork above, so it is somewhere
   else and has not been located yet. Worth finding before anyone starts.
 
+His own patch tree, `z3ntu/linux`, has 60 branches and is where the msm8974
+camera work turned out to be: **`flto-msm8974-5.17-camera`**, covering CAMSS
+and CCI device tree nodes, a CCI driver hack, Jonathan Marek's camss patch and
+a hand-written IMX179 driver, all for the Nexus 5. See `camera.md`. This is
+the branch that took three attempts to find, and the reason this page exists.
+
 Also `z3ntu/msm-mainline-status`, a Qualcomm mainline status tracker, and
 `z3ntu/linux-mdss-dsi-panel-driver-generator`, the generator mentioned above.
 

@@ -71,37 +71,22 @@ address `00 00 a0 00 17 02`), then DAI links added to the machine driver in
 
 Sony's stock tree supplies the micbias and routing configuration.
 
-## Camera — a variant to add, not an ISP driver
+## Camera — the ISP is nearly solved, the sensors are not
 
-**Correction.** Previously described as needing camss support for a SoC it
-does not cover, framed as a large project. The first half is true, the framing
-was too pessimistic.
+**Correction, twice over.** First described as needing camss support for a SoC
+it does not cover. Then revised to "add a variant". Both were wrong in the
+same way: nobody looked for existing work.
 
-msm8974's CAMSS, from Sony's tree:
+msm8974 camera exists, on the Nexus 5, in `z3ntu/linux` branch
+`flto-msm8974-5.17-camera`. It binds to `qcom,msm8916-camss` — no new variant
+was written — plus a ~150 line camss patch, a CCI hack and a hand-written
+sensor driver. The addresses in their device tree node are identical to the
+ones derived independently from Sony's tree here.
 
-| block | count | addresses | size | IRQs | compatible |
-|---|---|---|---|---|---|
-| CSIPHY | 3 | fda0ac00, fda0b000, fda0b400 | 0x200 | 78, 79, 80 | qcom,csiphy |
-| CSID | 4 | fda08000, fda08400, fda08800, fda08c00 | 0x100 | 51-54 | qcom,csid |
-| ISPIF | 1 | fda0a000 (+ csi_clk_mux fda00020) | 0x500 | 55 | qcom,ispif-v3.0 |
-| VFE | 2 | fda10000, fda14000 (+ vbif fda40000, tcsr fd4a8000) | 0x1000 | 57, 58 | **qcom,vfe40** |
-| CCI | 1 | fda0c000 | 0x1000 | 50 | qcom,cci |
-
-Two things follow. The topology — 3 CSIPHY, 4 CSID, 1 ISPIF, 2 VFE — is the
-same shape as msm8996, which camss supports, so nothing structural is missing;
-camss already handles multiple VFEs and CSIDs. And the VFE is `qcom,vfe40`,
-the same generation camss implements as `camss-vfe-4-1.c` for msm8916, rather
-than something camss has never seen.
-
-So the realistic shape is: a `msm8974_resources` table in `camss.c` modelled
-on the msm8996 one, using the addresses above; whatever deltas exist between
-msm8974's VFE40 and msm8916's, which need measuring rather than assuming; and
-the ISPIF, which msm8974 reports as v3.0.
-
-That is still a substantial piece of work and it is only the ISP. The image
-sensors need drivers of their own, and Sony hides the parts behind their own
-abstraction — the tree says `sony_camera_0` and `sony_camera_1` rather than
-naming the sensors, so identifying them is a prerequisite.
+What remains for this phone is the sensors: Sony hides the parts behind
+`sony_camera_0` and `sony_camera_1`, and mainline has no driver for a 2014
+Sony flagship sensor. Full detail, the hardware table and the device tree node
+in `camera.md`.
 
 ## FM radio — genuinely from scratch
 
