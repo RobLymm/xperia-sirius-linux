@@ -49,7 +49,8 @@ registers read fine.
     panel-variants/     the six panel configurations extracted from stock
     devicetree/         the board device tree the phone actually runs
     upstream/           a mainline-style device tree, for submission
-    userspace/          fixes needed on 32-bit ARM that are not Z2 specific
+    userspace/          the ALSA UCM profile, and fixes for 32-bit ARM
+                        that are not Z2 specific
     tools/              build a boot image, compile a device tree on the phone
     docs/               identification, extraction, prior art, and what each
                         unfinished part costs

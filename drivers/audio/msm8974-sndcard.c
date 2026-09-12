@@ -186,6 +186,11 @@ static int msm8974_snd_platform_probe(struct platform_device *pdev)
 	card = &data->card;
 	card->dev = dev;
 	card->owner = THIS_MODULE;
+	/*
+	 * Fixed, so that the UCM configuration is found by a stable path
+	 * rather than one derived from the board's model string.
+	 */
+	card->driver_name = "msm8974";
 	dev_set_drvdata(dev, card);
 	snd_soc_card_set_drvdata(card, data);
 

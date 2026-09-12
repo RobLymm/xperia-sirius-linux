@@ -25,15 +25,17 @@ its own DSP). Two pieces were missing.
 sets the DAI formats. Needs a Kconfig entry (`SND_SOC_MSM8974`) and a Makefile
 line alongside the other qcom machine drivers.
 
-**The q6afe change is not yet in this directory as a patch.** It has to be
-regenerated as a diff against mainline `sound/soc/qcom/qdsp6/q6afe.c`. The
-change is small and fully specified:
+**`0001-ASoC-qdsp6-q6afe-send-both-LPAIF-clocks-in-one-comman.patch`** is the
+q6afe fix, generated against 6.16.12 and verified to apply cleanly to a
+pristine tree. checkpatch passes with one deliberate exception: there is no
+`Signed-off-by` line, because that is the author's certification to add and
+not something a tool should write.
 
-- add `#define Q6AFE_LPASS_MODE_BOTH_VALID 3`
-- add `u32 lpaif_bit_clk; u32 lpaif_osr_clk;` to `struct q6afe_port`
-- merge the `LPAIF_BIT_CLK` and `LPAIF_OSR_CLK` cases so that both clock
-  values are always sent together in one command, with
-  `clk_set_mode = Q6AFE_LPASS_MODE_BOTH_VALID`
+It remembers each LPAIF clock as it is set and sends both together once both
+are known. Note the one design decision in it: the both-valid mode is used
+only when both clocks are non-zero, so platforms that set a single clock keep
+exactly the behaviour they had. Sending both unconditionally would have been
+a smaller patch and a behaviour change for every other qcom board.
 
 This is a bug fix to an existing mainline driver, it is not Z2 specific, and
 it should benefit any Qualcomm device driving MI2S where the DSP needs both
@@ -81,9 +83,14 @@ Config needed either way:
     CONFIG_SND_SOC_QCOM=m  SND_SOC_QCOM_COMMON=m  SND_SOC_QDSP6=m
     CONFIG_SND_SOC_MSM8974=m  SND_SOC_TFA989X=m  SND_COMPRESS_OFFLOAD=m
 
+It also sets `card->driver_name` to `msm8974`, which every other qcom machine
+driver does and ours did not. Without it the card's driver name is derived
+from the board model string, and the UCM lookup path moves with it.
+
 ## Still missing
 
-**An ALSA UCM profile.** Without one, PipeWire falls back to a generic stereo
+**~~An ALSA UCM profile~~** — written, in `../../userspace/ucm2/`, not yet
+verified on hardware. Without one, PipeWire falls back to a generic stereo
 profile: sound comes out, but there is no "Speaker" port, and volume controls
 do not behave the way a phone's should. This is userspace only, it needs no
 kernel work, and `alsa-ucm-conf` accepts contributions on GitHub. It is

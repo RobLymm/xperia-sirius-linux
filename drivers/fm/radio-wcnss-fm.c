@@ -307,7 +307,6 @@ static int wcnss_fm_g_tuner(struct file *file, void *priv,
 	if (tuner->index)
 		return -EINVAL;
 
-
 	ret = wcnss_fm_cmd(fm,
 			   fm_opcode(FM_OGF_RECV_CTRL, FM_OCF_GET_STATION_PARAM),
 			   NULL, 0);
@@ -340,7 +339,6 @@ static int wcnss_fm_s_tuner(struct file *file, void *priv,
 
 	mode = tuner->audmode == V4L2_TUNER_MODE_MONO ? 1 : 0;
 
-
 	return wcnss_fm_cmd(fm,
 			    fm_opcode(FM_OGF_RECV_CTRL, FM_OCF_SET_STEREO_MODE),
 			    &mode, sizeof(mode));
@@ -353,7 +351,6 @@ static int wcnss_fm_g_frequency(struct file *file, void *priv,
 
 	if (f->tuner)
 		return -EINVAL;
-
 
 	f->type = V4L2_TUNER_RADIO;
 	f->frequency = KHZ_TO_V4L2(fm->frequency);
@@ -373,7 +370,6 @@ static int wcnss_fm_s_frequency(struct file *file, void *priv,
 	khz = clamp_t(u32, V4L2_TO_KHZ(f->frequency), FM_FREQ_LOW, FM_FREQ_HIGH);
 	khz = rounddown(khz, FM_FREQ_STEP);
 
-
 	return wcnss_fm_tune(fm, khz);
 }
 
@@ -391,7 +387,6 @@ static int wcnss_fm_s_hw_freq_seek(struct file *file, void *priv,
 
 	params[0] = seek->seek_upward ? 1 : 0;
 	params[1] = 1;			/* scan direction, one station */
-
 
 	reinit_completion(&fm->seek_done);
 
