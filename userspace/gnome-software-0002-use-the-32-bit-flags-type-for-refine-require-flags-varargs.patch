@@ -1,0 +1,53 @@
+From: Rob Watson <rob@mediaeden.com>
+Subject: [PATCH] Pass refine-require-flags to varargs constructors as the 32-bit flags type
+
+GsAppQuery:refine-require-flags is a G_TYPE_FLAGS property (32-bit), but
+gs-updates-page.c and gs-cmd.c keep the value in a guint64 and hand it to
+gs_app_query_new(). Through varargs the 8-byte value is 8-byte aligned on
+32-bit ARM, so the GValue collector reads the padding word as the flags
+and the flags word as the next property name, and gnome-software crashes
+in g_param_spec_pool_lookup() when the Updates page loads.
+
+Declare those variables as GsPluginRefineRequireFlags, which is what every
+other caller and every non-varargs API already uses.
+
+--- a/src/gs-updates-page.c
++++ b/src/gs-updates-page.c
+@@ -613,7 +613,7 @@
+ 					GAsyncResult *res,
+ 					gpointer user_data)
+ {
+-	guint64 require_flags;
++	GsPluginRefineRequireFlags require_flags;
+ 	GsPluginLoader *plugin_loader = GS_PLUGIN_LOADER (source_object);
+ 	GsUpdatesPage *self = user_data;
+ 	GsPageHelper *helper;
+@@ -647,7 +647,7 @@
+ static void
+ gs_updates_page_load (GsUpdatesPage *self)
+ {
+-	guint64 require_flags;
++	GsPluginRefineRequireFlags require_flags;
+ 	g_autoptr(GsAppQuery) query = NULL;
+ 	g_autoptr(GsPluginJob) plugin_job = NULL;
+ 
+--- a/lib/gs-cmd.c
++++ b/lib/gs-cmd.c
+@@ -19,7 +19,7 @@
+ 
+ typedef struct {
+ 	GsPluginLoader	*plugin_loader;
+-	guint64		 require_flags;
++	GsPluginRefineRequireFlags require_flags;
+ 	guint		 max_results;
+ 	gboolean	 interactive;
+ 	gboolean	 only_freely_licensed;
+@@ -151,7 +151,7 @@
+ {
+ 	GsPluginRefineRequireFlags tmp;
+ 	guint i;
+-	guint64 require_flags = GS_PLUGIN_REFINE_REQUIRE_FLAGS_NONE;
++	GsPluginRefineRequireFlags require_flags = GS_PLUGIN_REFINE_REQUIRE_FLAGS_NONE;
+ 	g_auto(GStrv) split = NULL;
+ 
+ 	if (extra == NULL)

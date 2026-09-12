@@ -1,0 +1,20 @@
+Subject: [PATCH] iio: adc: qcom-spmi-vadc: report VBAT_SNS as a scaled voltage
+
+VBAT_SNS is declared with VADC_CHAN_NO_SCALE, so consumers only get the raw
+ADC code and iio_read_channel_processed() fails. The channel sits behind
+the fixed 1:3 divider (prescale index 1) and needs nothing beyond the
+default scaling, so declare it like VSYS. This lets an adc-battery node
+read the battery voltage on PM8941 boards without a fuel gauge driver.
+
+diff -Nur a/drivers/iio/adc/qcom-spmi-vadc.c b/drivers/iio/adc/qcom-spmi-vadc.c
+--- a/drivers/iio/adc/qcom-spmi-vadc.c	2026-09-11 07:49:40.003969360 +0100
++++ b/drivers/iio/adc/qcom-spmi-vadc.c	2026-09-11 07:49:40.022689244 +0100
+@@ -564,7 +564,7 @@
+ 	VADC_CHAN_NO_SCALE(SPARE1_03, 1)
+ 	VADC_CHAN_NO_SCALE(USB_ID_MV, 1)
+ 	VADC_CHAN_VOLT(VCOIN, 1, SCALE_DEFAULT)
+-	VADC_CHAN_NO_SCALE(VBAT_SNS, 1)
++	VADC_CHAN_VOLT(VBAT_SNS, 1, SCALE_DEFAULT)
+ 	VADC_CHAN_VOLT(VSYS, 1, SCALE_DEFAULT)
+ 	VADC_CHAN_TEMP(DIE_TEMP, 0, SCALE_PMIC_THERM)
+ 	VADC_CHAN_VOLT(REF_625MV, 0, SCALE_DEFAULT)

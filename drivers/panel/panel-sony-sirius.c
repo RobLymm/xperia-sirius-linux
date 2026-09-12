@@ -1,0 +1,910 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * DRM driver for the 1080x1920 DSI video mode LCD panels of the
+ * Sony Xperia Z2 (sirius, D6503).
+ *
+ * Copyright (c) 2026 Rob Watson <rob@mediaeden.com>
+ *
+ * Sony fitted the Z2 with panels from JDI, Sharp and AUO, driven by either a
+ * Renesas or a Novatek driver IC. The bootloader measures the panel ID
+ * voltage on PM8941 MPP6 (LCD_ID_ADC) and passes the reading on the kernel
+ * command line as lcdid_adc=<value>. Sony's kernel multiplies that value by
+ * somc,mul-channel-scaling (3) and matches the product against the
+ * somc,lcd-id-adc range of each panel entry in
+ * arch/arm/boot/dts/dsi-panel-sirius.dtsi of the downstream kernel
+ * (github.com/sonyxperiadev/kernel, branch aosp/LNX.LA.3.5.2.2-03010-8x74.0;
+ * the stock kernel in the FOTAKernel partition carries the same entries).
+ * Every command sequence, timing and power sequencing step below is
+ * transcribed from those entries.
+ *
+ * Variants, with the downstream panel name and lcd-id-adc range (microvolts):
+ *
+ *   sony,sirius-panel-renesas-sharp  "sharp renesas 1080p video"        0 -   57000
+ *   sony,sirius-panel-renesas-auo    "auo renesas 1080p video"     215000 -  256000
+ *   sony,sirius-panel-renesas-jdi    "jdi renesas 1080p video"     353000 -  414000
+ *   sony,sirius-panel-novatek-jdi    "jdi novatek 1080p video"    1087000 - 1231000
+ *
+ * The downstream tree also carries "sharp novatek 1080p video"
+ * (1236000 - 1395000) and "auo novatek 1080p video" (1420000 - 1594000); they
+ * are not included here.
+ *
+ * The generic compatible "sony,sirius-panel" selects the variant from
+ * lcdid_adc the way Sony's kernel does. The "variant" module parameter
+ * overrides both the generic detection and an explicit compatible.
+ */
+
+#include <linux/delay.h>
+#include <linux/gpio/consumer.h>
+#include <linux/ktime.h>
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/regulator/consumer.h>
+#include <linux/string.h>
+
+#include <video/mipi_display.h>
+
+#include <drm/drm_mipi_dsi.h>
+#include <drm/drm_modes.h>
+#include <drm/drm_panel.h>
+
+/* somc,mul-channel-scaling: lcdid_adc is measured behind a 1:3 divider */
+#define SIRIUS_LCD_ID_ADC_SCALE		3
+
+enum sirius_variant {
+	SIRIUS_AUTO = 0,
+	SIRIUS_RENESAS_SHARP,
+	SIRIUS_RENESAS_AUO,
+	SIRIUS_RENESAS_JDI,
+	SIRIUS_NOVATEK_JDI,
+	SIRIUS_NUM_VARIANTS
+};
+
+/* One <level delay> pair of a somc,pw-*-rst-seq property */
+struct sirius_reset_step {
+	bool release;			/* true: drive the reset line high */
+	unsigned int delay_ms;
+};
+
+struct sirius_panel_desc {
+	const char *id;			/* value of the "variant" module parameter */
+	const char *name;		/* qcom,mdss-dsi-panel-name */
+	u32 lcd_id_adc_min;		/* somc,lcd-id-adc, microvolts */
+	u32 lcd_id_adc_max;
+	const struct drm_display_mode *mode;
+	/* somc,mdss-dsi-init-command: sent in LP mode before the video stream */
+	int (*init)(struct mipi_dsi_multi_context *dsi_ctx);
+	/* qcom,mdss-dsi-on-command: sent in HS mode with the video stream running */
+	int (*on)(struct mipi_dsi_multi_context *dsi_ctx);
+	/* qcom,mdss-dsi-off-command: sent in HS mode with the video stream running */
+	int (*off)(struct mipi_dsi_multi_context *dsi_ctx);
+	unsigned int vsp_on_pre_ms;		/* somc,disp-en-on-pre */
+	unsigned int vsp_on_post_ms;		/* somc,disp-en-on-post */
+	const struct sirius_reset_step *reset_on;	/* somc,pw-on-rst-seq */
+	unsigned int reset_on_len;
+	const struct sirius_reset_step *reset_off_pre;	/* somc,pw-off-rst-b-seq */
+	unsigned int reset_off_pre_len;
+	unsigned int vsp_off_post_ms;		/* somc,disp-en-off-post */
+	const struct sirius_reset_step *reset_off;	/* somc,pw-off-rst-seq */
+	unsigned int reset_off_len;
+	unsigned int power_down_ms;		/* somc,pw-down-period */
+};
+
+struct sirius_panel {
+	struct drm_panel panel;
+	struct mipi_dsi_device *dsi;
+	const struct sirius_panel_desc *desc;
+	struct regulator *vddio;
+	struct regulator *vsp;
+	struct gpio_desc *reset_gpio;
+	ktime_t off_time;
+};
+
+static char *sirius_variant_param;
+module_param_named(variant, sirius_variant_param, charp, 0444);
+MODULE_PARM_DESC(variant,
+		 "Override the panel variant: renesas-sharp, renesas-auo, renesas-jdi or novatek-jdi");
+
+static inline struct sirius_panel *to_sirius_panel(struct drm_panel *panel)
+{
+	return container_of(panel, struct sirius_panel, panel);
+}
+
+/*
+ * Modes. Porches and pulse widths are the
+ * qcom,mdss-dsi-{h,v}-{front-porch,pulse-width,back-porch} values, the size
+ * is somc,mdss-phy-size-mm.
+ */
+
+static const struct drm_display_mode sirius_jdi_mode = {
+	.clock = (1080 + 112 + 4 + 76) * (1920 + 27 + 4 + 4) * 60 / 1000,
+	.hdisplay = 1080,
+	.hsync_start = 1080 + 112,
+	.hsync_end = 1080 + 112 + 4,
+	.htotal = 1080 + 112 + 4 + 76,
+	.vdisplay = 1920,
+	.vsync_start = 1920 + 27,
+	.vsync_end = 1920 + 27 + 4,
+	.vtotal = 1920 + 27 + 4 + 4,
+	.width_mm = 64,
+	.height_mm = 114,
+	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
+};
+
+static const struct drm_display_mode sirius_sharp_mode = {
+	.clock = (1080 + 128 + 4 + 76) * (1920 + 4 + 2 + 3) * 60 / 1000,
+	.hdisplay = 1080,
+	.hsync_start = 1080 + 128,
+	.hsync_end = 1080 + 128 + 4,
+	.htotal = 1080 + 128 + 4 + 76,
+	.vdisplay = 1920,
+	.vsync_start = 1920 + 4,
+	.vsync_end = 1920 + 4 + 2,
+	.vtotal = 1920 + 4 + 2 + 3,
+	.width_mm = 64,
+	.height_mm = 114,
+	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
+};
+
+static const struct drm_display_mode sirius_auo_mode = {
+	.clock = (1080 + 104 + 20 + 56) * (1920 + 24 + 10 + 20) * 60 / 1000,
+	.hdisplay = 1080,
+	.hsync_start = 1080 + 104,
+	.hsync_end = 1080 + 104 + 20,
+	.htotal = 1080 + 104 + 20 + 56,
+	.vdisplay = 1920,
+	.vsync_start = 1920 + 24,
+	.vsync_end = 1920 + 24 + 10,
+	.vtotal = 1920 + 24 + 10 + 20,
+	.width_mm = 64,
+	.height_mm = 114,
+	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
+};
+
+/*
+ * Reset sequences. Downstream <1 n> drives the reset line high and waits
+ * n ms, <0 n> drives it low and waits n ms.
+ */
+
+static const struct sirius_reset_step sirius_reset_release_10ms[] = {
+	{ .release = true, .delay_ms = 10 },
+};
+
+static const struct sirius_reset_step sirius_reset_assert[] = {
+	{ .release = false, .delay_ms = 0 },
+};
+
+static const struct sirius_reset_step sirius_sharp_reset_on[] = {
+	{ .release = false, .delay_ms = 60 },
+	{ .release = true, .delay_ms = 10 },
+};
+
+static const struct sirius_reset_step sirius_sharp_reset_off_pre[] = {
+	{ .release = false, .delay_ms = 10 },
+};
+
+static const struct sirius_reset_step sirius_auo_reset_on[] = {
+	{ .release = true, .delay_ms = 10 },
+	{ .release = false, .delay_ms = 1 },
+	{ .release = true, .delay_ms = 10 },
+};
+
+/* Shared on/off sequences */
+
+static int sirius_on_exit_sleep_120ms_display_on(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_exit_sleep_mode_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 120);
+	mipi_dsi_dcs_set_display_on_multi(dsi_ctx);
+
+	return dsi_ctx->accum_err;
+}
+
+static int sirius_off_20ms_80ms(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_set_display_off_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 20);
+	mipi_dsi_dcs_enter_sleep_mode_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 80);
+
+	return dsi_ctx->accum_err;
+}
+
+/* "jdi renesas 1080p video" */
+
+static const u8 sirius_renesas_jdi_gamma_a[] = {
+	0xc7, 0x08, 0x12, 0x1b, 0x24, 0x31, 0x48, 0x40, 0x52, 0x5e, 0x61, 0x6a, 0x76,
+	      0x08, 0x12, 0x1b, 0x24, 0x31, 0x48, 0x40, 0x52, 0x5e, 0x61, 0x6a, 0x76,
+};
+
+static const u8 sirius_renesas_jdi_gamma_b[] = {
+	0xc8, 0x08, 0x12, 0x1b, 0x24, 0x31, 0x49, 0x41, 0x53, 0x5e, 0x61, 0x6a, 0x76,
+	      0x08, 0x12, 0x1b, 0x24, 0x31, 0x49, 0x41, 0x53, 0x5e, 0x61, 0x6a, 0x76,
+};
+
+static const u8 sirius_renesas_jdi_gamma_c[] = {
+	0xc9, 0x08, 0x12, 0x1b, 0x24, 0x31, 0x47, 0x3f, 0x52, 0x5e, 0x61, 0x6a, 0x76,
+	      0x08, 0x12, 0x1b, 0x24, 0x31, 0x47, 0x3f, 0x52, 0x5e, 0x61, 0x6a, 0x76,
+};
+
+static const u8 sirius_renesas_jdi_d3[] = {
+	0xd3, 0x1b, 0x33, 0xbb, 0xcc, 0xc4, 0x33, 0x33, 0x33, 0x00, 0x01, 0x00, 0xa0,
+	      0xd8, 0xa0, 0x06, 0x2b, 0x33, 0x33, 0x22, 0x70, 0x02, 0x2b, 0x43, 0x3d,
+	      0xbf, 0x99,
+};
+
+static int sirius_renesas_jdi_init(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_soft_reset_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 5);
+	/* Manufacturer command access protect */
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xb0, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0x00, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0x00, 0x00);
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_jdi_gamma_a,
+				     sizeof(sirius_renesas_jdi_gamma_a));
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_jdi_gamma_b,
+				     sizeof(sirius_renesas_jdi_gamma_b));
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_jdi_gamma_c,
+				     sizeof(sirius_renesas_jdi_gamma_c));
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_jdi_d3,
+				     sizeof(sirius_renesas_jdi_d3));
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd6, 0x01);
+
+	return dsi_ctx->accum_err;
+}
+
+/* "sharp renesas 1080p video" */
+
+static const u8 sirius_renesas_sharp_gamma_a[] = {
+	0xc7, 0x05, 0x19, 0x22, 0x2b, 0x38, 0x51, 0x41, 0x50, 0x5c, 0x64, 0x6b, 0x74,
+	      0x0f, 0x23, 0x2b, 0x32, 0x3f, 0x52, 0x44, 0x55, 0x61, 0x69, 0x70, 0x77,
+};
+
+static const u8 sirius_renesas_sharp_gamma_b[] = {
+	0xc8, 0x03, 0x18, 0x21, 0x2b, 0x38, 0x51, 0x42, 0x4f, 0x5d, 0x65, 0x6c, 0x74,
+	      0x0d, 0x22, 0x2a, 0x32, 0x3e, 0x52, 0x41, 0x54, 0x5d, 0x66, 0x6d, 0x77,
+};
+
+static const u8 sirius_renesas_sharp_gamma_c[] = {
+	0xc9, 0x00, 0x15, 0x1e, 0x28, 0x36, 0x50, 0x42, 0x50, 0x5e, 0x66, 0x6d, 0x74,
+	      0x0a, 0x1f, 0x27, 0x2f, 0x3d, 0x51, 0x41, 0x55, 0x5e, 0x67, 0x6e, 0x77,
+};
+
+static int sirius_renesas_sharp_init(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	/* Manufacturer command access protect */
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xb0, 0x04);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0x00, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0x00, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd6, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc0, 0x0f, 0x0f);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xec, 0x00, 0x10);
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_sharp_gamma_a,
+				     sizeof(sirius_renesas_sharp_gamma_a));
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_sharp_gamma_b,
+				     sizeof(sirius_renesas_sharp_gamma_b));
+	mipi_dsi_generic_write_multi(dsi_ctx, sirius_renesas_sharp_gamma_c,
+				     sizeof(sirius_renesas_sharp_gamma_c));
+	mipi_dsi_dcs_exit_sleep_mode_multi(dsi_ctx);
+
+	return dsi_ctx->accum_err;
+}
+
+static int sirius_renesas_sharp_on(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	/* somc,mdss-dsi-wait-time-before-on-cmd */
+	mipi_dsi_msleep(dsi_ctx, 150);
+	mipi_dsi_dcs_set_display_on_multi(dsi_ctx);
+
+	return dsi_ctx->accum_err;
+}
+
+static int sirius_renesas_sharp_off(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_set_display_off_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 20);
+	mipi_dsi_dcs_enter_sleep_mode_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 110);
+
+	return dsi_ctx->accum_err;
+}
+
+/* "auo renesas 1080p video" */
+
+static int sirius_renesas_auo_init(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_set_tear_on_multi(dsi_ctx, MIPI_DSI_DCS_TEAR_MODE_VHBLANK);
+	/* Manufacturer command access protect */
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xb0, 0x04);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc2, 0x30, 0xf7, 0x84, 0x1b,
+					 0x0c, 0x00, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd6, 0x01);
+	mipi_dsi_dcs_set_display_on_multi(dsi_ctx);
+
+	return dsi_ctx->accum_err;
+}
+
+static int sirius_renesas_auo_on(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_exit_sleep_mode_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 120);
+
+	return dsi_ctx->accum_err;
+}
+
+static int sirius_renesas_auo_off(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_dcs_set_display_off_multi(dsi_ctx);
+	mipi_dsi_dcs_enter_sleep_mode_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 67);
+
+	return dsi_ctx->accum_err;
+}
+
+/*
+ * "jdi novatek 1080p video"
+ *
+ * After the soft reset the downstream init sequence is a long run of
+ * two-byte register writes, most of them generic short writes (data type
+ * 0x23) and five of them DCS short writes (data type 0x15).
+ */
+
+struct sirius_reg_write {
+	u8 reg;
+	u8 val;
+	bool dcs;
+};
+
+#define GEN(r, v)	{ .reg = (r), .val = (v) }
+#define DCS(r, v)	{ .reg = (r), .val = (v), .dcs = true }
+
+static const struct sirius_reg_write sirius_novatek_jdi_init_regs[] = {
+	GEN(0xff, 0x01), GEN(0x75, 0x00), GEN(0x76, 0x30), GEN(0x77, 0x00),
+	GEN(0x78, 0x43), GEN(0x79, 0x00), GEN(0x7a, 0x61), GEN(0x7b, 0x00),
+	GEN(0x7c, 0x7d), GEN(0x7d, 0x00), GEN(0x7e, 0x98), GEN(0x7f, 0x00),
+	GEN(0x80, 0xae), GEN(0x81, 0x00), GEN(0x82, 0xc0), GEN(0x83, 0x00),
+	GEN(0x84, 0xcd), GEN(0x85, 0x00), GEN(0x86, 0xdb), GEN(0x87, 0x01),
+	GEN(0x88, 0x0a), GEN(0x89, 0x01), GEN(0x8a, 0x2a), GEN(0x8b, 0x01),
+	GEN(0x8c, 0x66), GEN(0x8d, 0x01), GEN(0x8e, 0x95), GEN(0x8f, 0x01),
+	GEN(0x90, 0xd8), GEN(0x91, 0x02), GEN(0x92, 0x1a), GEN(0x93, 0x02),
+	GEN(0x94, 0x1c), GEN(0x95, 0x02), GEN(0x96, 0x5e), GEN(0x97, 0x02),
+	GEN(0x98, 0x9a), GEN(0x99, 0x02), GEN(0x9a, 0xbf), GEN(0x9b, 0x02),
+	GEN(0x9c, 0xed), GEN(0x9d, 0x03), GEN(0x9e, 0x0b), GEN(0x9f, 0x03),
+	GEN(0xa0, 0x36), GEN(0xa2, 0x03), GEN(0xa3, 0x3b), GEN(0xa4, 0x03),
+	GEN(0xa5, 0x40), GEN(0xa6, 0x03), GEN(0xa7, 0x45), GEN(0xa9, 0x03),
+	GEN(0xaa, 0x54), GEN(0xab, 0x03), GEN(0xac, 0x70), GEN(0xad, 0x03),
+	GEN(0xae, 0x8e), GEN(0xaf, 0x03), GEN(0xb0, 0xb2), GEN(0xb1, 0x03),
+	GEN(0xb2, 0xc9), GEN(0xb3, 0x00), GEN(0xb4, 0x30), GEN(0xb5, 0x00),
+	GEN(0xb6, 0x43), GEN(0xb7, 0x00), GEN(0xb8, 0x61), GEN(0xb9, 0x00),
+	GEN(0xba, 0x7d), GEN(0xbb, 0x00), GEN(0xbc, 0x98), GEN(0xbd, 0x00),
+	GEN(0xbe, 0xae), GEN(0xbf, 0x00), GEN(0xc0, 0xc0), GEN(0xc1, 0x00),
+	GEN(0xc2, 0xcd), GEN(0xc3, 0x00), GEN(0xc4, 0xdb), GEN(0xc5, 0x01),
+	GEN(0xc6, 0x0a), GEN(0xc7, 0x01), GEN(0xc8, 0x2a), GEN(0xc9, 0x01),
+	GEN(0xca, 0x66), GEN(0xcb, 0x01), GEN(0xcc, 0x95), GEN(0xcd, 0x01),
+	GEN(0xce, 0xd8), GEN(0xcf, 0x02), GEN(0xd0, 0x1a), GEN(0xd1, 0x02),
+	GEN(0xd2, 0x1c), GEN(0xd3, 0x02), GEN(0xd4, 0x5e), GEN(0xd5, 0x02),
+	GEN(0xd6, 0x9a), GEN(0xd7, 0x02), GEN(0xd8, 0xbf), GEN(0xd9, 0x02),
+	GEN(0xda, 0xed), GEN(0xdb, 0x03), GEN(0xdc, 0x0b), GEN(0xdd, 0x03),
+	GEN(0xde, 0x36), GEN(0xdf, 0x03), GEN(0xe0, 0x3b), GEN(0xe1, 0x03),
+	GEN(0xe2, 0x40), GEN(0xe3, 0x03), GEN(0xe4, 0x45), GEN(0xe5, 0x03),
+	GEN(0xe6, 0x54), GEN(0xe7, 0x03), GEN(0xe8, 0x70), GEN(0xe9, 0x03),
+	GEN(0xea, 0x8e), GEN(0xeb, 0x03), GEN(0xec, 0xb2), GEN(0xed, 0x03),
+	GEN(0xee, 0xc9), GEN(0xef, 0x00), GEN(0xf0, 0x30), GEN(0xf1, 0x00),
+	GEN(0xf2, 0x43), GEN(0xf3, 0x00), GEN(0xf4, 0x61), GEN(0xf5, 0x00),
+	GEN(0xf6, 0x7d), GEN(0xf7, 0x00), GEN(0xf8, 0x98), GEN(0xf9, 0x00),
+	GEN(0xfa, 0xae), GEN(0xfb, 0x01), GEN(0xff, 0x02), GEN(0x00, 0x00),
+	GEN(0x01, 0xc0), GEN(0x02, 0x00), GEN(0x03, 0xcd), GEN(0x04, 0x00),
+	GEN(0x05, 0xdb), GEN(0x06, 0x01), GEN(0x07, 0x0a), GEN(0x08, 0x01),
+	GEN(0x09, 0x2a), GEN(0x0a, 0x01), GEN(0x0b, 0x69), GEN(0x0c, 0x01),
+	GEN(0x0d, 0x99), GEN(0x0e, 0x01), GEN(0x0f, 0xde), GEN(0x10, 0x02),
+	GEN(0x11, 0x20), GEN(0x12, 0x02), GEN(0x13, 0x22), GEN(0x14, 0x02),
+	GEN(0x15, 0x64), GEN(0x16, 0x02), GEN(0x17, 0xa0), GEN(0x18, 0x02),
+	GEN(0x19, 0xc4), GEN(0x1a, 0x02), GEN(0x1b, 0xf3), GEN(0x1c, 0x03),
+	GEN(0x1d, 0x0f), GEN(0x1e, 0x03), GEN(0x1f, 0x36), GEN(0x20, 0x03),
+	GEN(0x21, 0x3b), GEN(0x22, 0x03), GEN(0x23, 0x40), GEN(0x24, 0x03),
+	GEN(0x25, 0x45), GEN(0x26, 0x03), GEN(0x27, 0x54), GEN(0x28, 0x03),
+	GEN(0x29, 0x70), GEN(0x2a, 0x03), GEN(0x2b, 0x8e), GEN(0x2d, 0x03),
+	GEN(0x2f, 0xb2), GEN(0x30, 0x03), GEN(0x31, 0xc9), GEN(0x32, 0x00),
+	GEN(0x33, 0x30), GEN(0x34, 0x00), GEN(0x35, 0x43), GEN(0x36, 0x00),
+	GEN(0x37, 0x61), GEN(0x38, 0x00), GEN(0x39, 0x7d), GEN(0x3a, 0x00),
+	GEN(0x3b, 0x98), GEN(0x3d, 0x00), GEN(0x3f, 0xae), GEN(0x40, 0x00),
+	GEN(0x41, 0xc0), GEN(0x42, 0x00), GEN(0x43, 0xcd), GEN(0x44, 0x00),
+	GEN(0x45, 0xdb), GEN(0x46, 0x01), GEN(0x47, 0x0a), GEN(0x48, 0x01),
+	GEN(0x49, 0x2a), GEN(0x4a, 0x01), GEN(0x4b, 0x69), GEN(0x4c, 0x01),
+	GEN(0x4d, 0x99), GEN(0x4e, 0x01), GEN(0x4f, 0xde), GEN(0x50, 0x02),
+	GEN(0x51, 0x20), GEN(0x52, 0x02), GEN(0x53, 0x22), GEN(0x54, 0x02),
+	GEN(0x55, 0x64), GEN(0x56, 0x02), GEN(0x58, 0xa0), GEN(0x59, 0x02),
+	GEN(0x5a, 0xc4), GEN(0x5b, 0x02), GEN(0x5c, 0xf3), GEN(0x5d, 0x03),
+	GEN(0x5e, 0x0f), GEN(0x5f, 0x03), GEN(0x60, 0x36), GEN(0x61, 0x03),
+	GEN(0x62, 0x3b), GEN(0x63, 0x03), GEN(0x64, 0x40), GEN(0x65, 0x03),
+	GEN(0x66, 0x45), GEN(0x67, 0x03), GEN(0x68, 0x54), GEN(0x69, 0x03),
+	GEN(0x6a, 0x70), GEN(0x6b, 0x03), GEN(0x6c, 0x8e), GEN(0x6d, 0x03),
+	GEN(0x6e, 0xb2), GEN(0x6f, 0x03), GEN(0x70, 0xc9), GEN(0x71, 0x00),
+	GEN(0x72, 0x30), GEN(0x73, 0x00), GEN(0x74, 0x43), GEN(0x75, 0x00),
+	GEN(0x76, 0x61), GEN(0x77, 0x00), GEN(0x78, 0x7d), GEN(0x79, 0x00),
+	GEN(0x7a, 0x98), GEN(0x7b, 0x00), GEN(0x7c, 0xae), GEN(0x7d, 0x00),
+	GEN(0x7e, 0xc0), GEN(0x7f, 0x00), GEN(0x80, 0xcd), GEN(0x81, 0x00),
+	GEN(0x82, 0xdb), GEN(0x83, 0x01), GEN(0x84, 0x0a), GEN(0x85, 0x01),
+	GEN(0x86, 0x2a), GEN(0x87, 0x01), GEN(0x88, 0x63), GEN(0x89, 0x01),
+	GEN(0x8a, 0x90), GEN(0x8b, 0x01), GEN(0x8c, 0xd2), GEN(0x8d, 0x02),
+	GEN(0x8e, 0x14), GEN(0x8f, 0x02), GEN(0x90, 0x16), GEN(0x91, 0x02),
+	GEN(0x92, 0x58), GEN(0x93, 0x02), GEN(0x94, 0x95), GEN(0x95, 0x02),
+	GEN(0x96, 0xbc), GEN(0x97, 0x02), GEN(0x98, 0xed), GEN(0x99, 0x03),
+	GEN(0x9a, 0x0b), GEN(0x9b, 0x03), GEN(0x9c, 0x36), GEN(0x9d, 0x03),
+	GEN(0x9e, 0x3b), GEN(0x9f, 0x03), GEN(0xa0, 0x40), GEN(0xa2, 0x03),
+	GEN(0xa3, 0x45), GEN(0xa4, 0x03), GEN(0xa5, 0x54), GEN(0xa6, 0x03),
+	GEN(0xa7, 0x70), GEN(0xa9, 0x03), GEN(0xaa, 0x8e), GEN(0xab, 0x03),
+	GEN(0xac, 0xb2), GEN(0xad, 0x03), GEN(0xae, 0xc9), GEN(0xaf, 0x00),
+	GEN(0xb0, 0x30), GEN(0xb1, 0x00), GEN(0xb2, 0x43), GEN(0xb3, 0x00),
+	GEN(0xb4, 0x61), GEN(0xb5, 0x00), GEN(0xb6, 0x7d), GEN(0xb7, 0x00),
+	GEN(0xb8, 0x98), GEN(0xb9, 0x00), GEN(0xba, 0xae), GEN(0xbb, 0x00),
+	GEN(0xbc, 0xc0), GEN(0xbd, 0x00), GEN(0xbe, 0xcd), GEN(0xbf, 0x00),
+	GEN(0xc0, 0xdb), GEN(0xc1, 0x01), GEN(0xc2, 0x0a), GEN(0xc3, 0x01),
+	GEN(0xc4, 0x2a), GEN(0xc5, 0x01), GEN(0xc6, 0x63), GEN(0xc7, 0x01),
+	GEN(0xc8, 0x90), GEN(0xc9, 0x01), GEN(0xca, 0xd2), GEN(0xcb, 0x02),
+	GEN(0xcc, 0x14), GEN(0xcd, 0x02), GEN(0xce, 0x16), GEN(0xcf, 0x02),
+	GEN(0xd0, 0x58), GEN(0xd1, 0x02), GEN(0xd2, 0x95), GEN(0xd3, 0x02),
+	GEN(0xd4, 0xbc), GEN(0xd5, 0x02), GEN(0xd6, 0xed), GEN(0xd7, 0x03),
+	GEN(0xd8, 0x0b), GEN(0xd9, 0x03), GEN(0xda, 0x36), GEN(0xdb, 0x03),
+	GEN(0xdc, 0x3b), GEN(0xdd, 0x03), GEN(0xde, 0x40), GEN(0xdf, 0x03),
+	GEN(0xe0, 0x45), GEN(0xe1, 0x03), GEN(0xe2, 0x54), GEN(0xe3, 0x03),
+	GEN(0xe4, 0x70), GEN(0xe5, 0x03), GEN(0xe6, 0x8e), GEN(0xe7, 0x03),
+	GEN(0xe8, 0xb2), GEN(0xe9, 0x03), GEN(0xea, 0xc9), GEN(0xfb, 0x01),
+	GEN(0xff, 0x01), GEN(0x0b, 0x4b), GEN(0x0c, 0x4b), GEN(0x0e, 0xa1),
+	GEN(0x15, 0x0b), GEN(0x16, 0x0b), GEN(0x1b, 0x1b), GEN(0x1c, 0xf5),
+	GEN(0x01, 0x44), GEN(0x5c, 0x82), GEN(0x5e, 0x02), GEN(0x60, 0x0f),
+	GEN(0x66, 0x01), GEN(0x69, 0x99), GEN(0x6d, 0x33), GEN(0xfb, 0x01),
+	GEN(0xff, 0x05), GEN(0x35, 0x6b), GEN(0x7e, 0x02), GEN(0x7f, 0x18),
+	GEN(0x81, 0x05), GEN(0x82, 0x05), GEN(0xa6, 0x04), GEN(0x84, 0x03),
+	GEN(0x85, 0x04), DCS(0xc6, 0x00), GEN(0xfb, 0x01), GEN(0xff, 0xff),
+	GEN(0x4f, 0x03), GEN(0xfb, 0x01), GEN(0xff, 0x00), DCS(0xd3, 0x08),
+	DCS(0xd4, 0x1b), DCS(0xd5, 0x50), DCS(0xd6, 0x70),
+};
+
+#undef GEN
+#undef DCS
+
+static int sirius_novatek_jdi_init(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	unsigned int i;
+
+	mipi_dsi_dcs_soft_reset_multi(dsi_ctx);
+	mipi_dsi_msleep(dsi_ctx, 10);
+
+	for (i = 0; i < ARRAY_SIZE(sirius_novatek_jdi_init_regs); i++) {
+		const struct sirius_reg_write *w = &sirius_novatek_jdi_init_regs[i];
+		const u8 buf[2] = { w->reg, w->val };
+
+		if (w->dcs)
+			mipi_dsi_dcs_write_buffer_multi(dsi_ctx, buf, sizeof(buf));
+		else
+			mipi_dsi_generic_write_multi(dsi_ctx, buf, sizeof(buf));
+	}
+
+	return dsi_ctx->accum_err;
+}
+
+static const struct sirius_panel_desc sirius_panels[SIRIUS_NUM_VARIANTS] = {
+	[SIRIUS_RENESAS_SHARP] = {
+		.id = "renesas-sharp",
+		.name = "sharp renesas 1080p video",
+		.lcd_id_adc_min = 0,
+		.lcd_id_adc_max = 57000,
+		.mode = &sirius_sharp_mode,
+		.init = sirius_renesas_sharp_init,
+		.on = sirius_renesas_sharp_on,
+		.off = sirius_renesas_sharp_off,
+		.vsp_on_pre_ms = 25,
+		.reset_on = sirius_sharp_reset_on,
+		.reset_on_len = ARRAY_SIZE(sirius_sharp_reset_on),
+		.reset_off_pre = sirius_sharp_reset_off_pre,
+		.reset_off_pre_len = ARRAY_SIZE(sirius_sharp_reset_off_pre),
+		.vsp_off_post_ms = 50,
+	},
+	[SIRIUS_RENESAS_AUO] = {
+		.id = "renesas-auo",
+		.name = "auo renesas 1080p video",
+		.lcd_id_adc_min = 215000,
+		.lcd_id_adc_max = 256000,
+		.mode = &sirius_auo_mode,
+		.init = sirius_renesas_auo_init,
+		.on = sirius_renesas_auo_on,
+		.off = sirius_renesas_auo_off,
+		.reset_on = sirius_auo_reset_on,
+		.reset_on_len = ARRAY_SIZE(sirius_auo_reset_on),
+		.reset_off = sirius_reset_assert,
+		.reset_off_len = ARRAY_SIZE(sirius_reset_assert),
+	},
+	[SIRIUS_RENESAS_JDI] = {
+		.id = "renesas-jdi",
+		.name = "jdi renesas 1080p video",
+		.lcd_id_adc_min = 353000,
+		.lcd_id_adc_max = 414000,
+		.mode = &sirius_jdi_mode,
+		.init = sirius_renesas_jdi_init,
+		.on = sirius_on_exit_sleep_120ms_display_on,
+		.off = sirius_off_20ms_80ms,
+		.vsp_on_pre_ms = 5,
+		.vsp_on_post_ms = 15,
+		.reset_on = sirius_reset_release_10ms,
+		.reset_on_len = ARRAY_SIZE(sirius_reset_release_10ms),
+		.vsp_off_post_ms = 70,
+		.reset_off = sirius_reset_assert,
+		.reset_off_len = ARRAY_SIZE(sirius_reset_assert),
+	},
+	[SIRIUS_NOVATEK_JDI] = {
+		.id = "novatek-jdi",
+		.name = "jdi novatek 1080p video",
+		.lcd_id_adc_min = 1087000,
+		.lcd_id_adc_max = 1231000,
+		.mode = &sirius_jdi_mode,
+		.init = sirius_novatek_jdi_init,
+		.on = sirius_on_exit_sleep_120ms_display_on,
+		.off = sirius_off_20ms_80ms,
+		.vsp_on_pre_ms = 5,
+		.vsp_on_post_ms = 20,
+		.reset_on = sirius_reset_release_10ms,
+		.reset_on_len = ARRAY_SIZE(sirius_reset_release_10ms),
+		.vsp_off_post_ms = 70,
+		.reset_off = sirius_reset_assert,
+		.reset_off_len = ARRAY_SIZE(sirius_reset_assert),
+		.power_down_ms = 200,
+	},
+};
+
+/*
+ * The reset line is active low (DISP_RESET_N, PM8941 GPIO19) and must be
+ * described with GPIO_ACTIVE_LOW, so an asserted GPIO drives the line low.
+ */
+static void sirius_panel_run_reset_seq(struct sirius_panel *ctx,
+				       const struct sirius_reset_step *seq,
+				       unsigned int len)
+{
+	unsigned int i;
+
+	for (i = 0; i < len; i++) {
+		gpiod_set_value_cansleep(ctx->reset_gpio, !seq[i].release);
+		if (seq[i].delay_ms)
+			fsleep(seq[i].delay_ms * 1000);
+	}
+}
+
+static int sirius_panel_power_on(struct sirius_panel *ctx)
+{
+	const struct sirius_panel_desc *desc = ctx->desc;
+	int ret;
+
+	/* somc,pw-down-period: minimum time between power off and power on */
+	if (desc->power_down_ms && ctx->off_time) {
+		s64 since_off = ktime_ms_delta(ktime_get(), ctx->off_time);
+
+		if (since_off < desc->power_down_ms)
+			fsleep((desc->power_down_ms - since_off) * 1000);
+	}
+
+	ret = regulator_enable(ctx->vddio);
+	if (ret)
+		return ret;
+
+	if (desc->vsp_on_pre_ms)
+		fsleep(desc->vsp_on_pre_ms * 1000);
+
+	ret = regulator_enable(ctx->vsp);
+	if (ret) {
+		regulator_disable(ctx->vddio);
+		return ret;
+	}
+
+	if (desc->vsp_on_post_ms)
+		fsleep(desc->vsp_on_post_ms * 1000);
+
+	sirius_panel_run_reset_seq(ctx, desc->reset_on, desc->reset_on_len);
+
+	return 0;
+}
+
+static void sirius_panel_power_off(struct sirius_panel *ctx)
+{
+	const struct sirius_panel_desc *desc = ctx->desc;
+
+	sirius_panel_run_reset_seq(ctx, desc->reset_off_pre,
+				   desc->reset_off_pre_len);
+
+	regulator_disable(ctx->vsp);
+	if (desc->vsp_off_post_ms)
+		fsleep(desc->vsp_off_post_ms * 1000);
+
+	sirius_panel_run_reset_seq(ctx, desc->reset_off, desc->reset_off_len);
+
+	regulator_disable(ctx->vddio);
+	ctx->off_time = ktime_get();
+}
+
+/*
+ * Report the DCS ID bytes (RDID1..3) so the fitted panel can be identified
+ * from the kernel log. Failures are logged and otherwise ignored.
+ */
+static void sirius_panel_log_ids(struct sirius_panel *ctx)
+{
+	struct device *dev = &ctx->dsi->dev;
+	u8 id[3] = {};
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < ARRAY_SIZE(id); i++) {
+		ret = mipi_dsi_dcs_read(ctx->dsi, 0xda + i, &id[i], 1);
+		if (ret < 0) {
+			dev_info(dev, "panel ID read (0x%02x) failed: %d\n",
+				 0xda + i, ret);
+			return;
+		}
+	}
+
+	dev_info(dev, "panel ID bytes: %02x %02x %02x\n", id[0], id[1], id[2]);
+}
+
+static int sirius_panel_prepare(struct drm_panel *panel)
+{
+	struct sirius_panel *ctx = to_sirius_panel(panel);
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
+	int ret;
+
+	ret = sirius_panel_power_on(ctx);
+	if (ret) {
+		dev_err(panel->dev, "failed to power on panel: %d\n", ret);
+		return ret;
+	}
+
+	ctx->dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	sirius_panel_log_ids(ctx);
+
+	ret = ctx->desc->init(&dsi_ctx);
+	if (ret) {
+		dev_err(panel->dev, "failed to initialise panel: %d\n", ret);
+		sirius_panel_power_off(ctx);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int sirius_panel_enable(struct drm_panel *panel)
+{
+	struct sirius_panel *ctx = to_sirius_panel(panel);
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
+	int ret;
+
+	ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+
+	ret = ctx->desc->on(&dsi_ctx);
+	if (ret)
+		dev_err(panel->dev, "failed to turn panel on: %d\n", ret);
+
+	return ret;
+}
+
+static int sirius_panel_disable(struct drm_panel *panel)
+{
+	struct sirius_panel *ctx = to_sirius_panel(panel);
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
+	int ret;
+
+	ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+
+	ret = ctx->desc->off(&dsi_ctx);
+	if (ret)
+		dev_err(panel->dev, "failed to turn panel off: %d\n", ret);
+
+	return 0;
+}
+
+static int sirius_panel_unprepare(struct drm_panel *panel)
+{
+	struct sirius_panel *ctx = to_sirius_panel(panel);
+
+	sirius_panel_power_off(ctx);
+
+	return 0;
+}
+
+static int sirius_panel_get_modes(struct drm_panel *panel,
+				  struct drm_connector *connector)
+{
+	struct sirius_panel *ctx = to_sirius_panel(panel);
+	struct drm_display_mode *mode;
+
+	mode = drm_mode_duplicate(connector->dev, ctx->desc->mode);
+	if (!mode)
+		return -ENOMEM;
+
+	drm_mode_set_name(mode);
+
+	connector->display_info.width_mm = mode->width_mm;
+	connector->display_info.height_mm = mode->height_mm;
+	drm_mode_probed_add(connector, mode);
+
+	return 1;
+}
+
+static const struct drm_panel_funcs sirius_panel_funcs = {
+	.prepare = sirius_panel_prepare,
+	.enable = sirius_panel_enable,
+	.disable = sirius_panel_disable,
+	.unprepare = sirius_panel_unprepare,
+	.get_modes = sirius_panel_get_modes,
+};
+
+/*
+ * Select the variant from lcdid_adc= on the kernel command line, applying
+ * the same scaling and ranges as Sony's kernel.
+ */
+static const struct sirius_panel_desc *sirius_panel_detect(struct device *dev)
+{
+	struct device_node *chosen;
+	const char *bootargs, *p;
+	unsigned int adc, uv, i;
+	int ret;
+
+	chosen = of_find_node_by_path("/chosen");
+	if (!chosen)
+		return ERR_PTR(-ENODEV);
+
+	ret = of_property_read_string(chosen, "bootargs", &bootargs);
+	of_node_put(chosen);
+	if (ret)
+		return ERR_PTR(ret);
+
+	p = strstr(bootargs, "lcdid_adc=");
+	if (!p || sscanf(p + strlen("lcdid_adc="), "%i", &adc) != 1) {
+		dev_err(dev, "no lcdid_adc= on the kernel command line, use an explicit compatible\n");
+		return ERR_PTR(-ENODEV);
+	}
+
+	uv = adc * SIRIUS_LCD_ID_ADC_SCALE;
+
+	for (i = SIRIUS_AUTO + 1; i < SIRIUS_NUM_VARIANTS; i++) {
+		const struct sirius_panel_desc *desc = &sirius_panels[i];
+
+		if (uv >= desc->lcd_id_adc_min && uv <= desc->lcd_id_adc_max) {
+			dev_info(dev, "lcdid_adc=%u (%u uV): %s\n", adc, uv,
+				 desc->name);
+			return desc;
+		}
+	}
+
+	dev_err(dev, "lcdid_adc=%u (%u uV) matches no known panel\n", adc, uv);
+
+	return ERR_PTR(-ENODEV);
+}
+
+static const struct sirius_panel_desc *sirius_panel_select(struct device *dev)
+{
+	enum sirius_variant variant;
+	unsigned int i;
+
+	if (sirius_variant_param) {
+		for (i = SIRIUS_AUTO + 1; i < SIRIUS_NUM_VARIANTS; i++) {
+			if (!strcmp(sirius_variant_param, sirius_panels[i].id)) {
+				dev_info(dev, "variant forced by module parameter: %s\n",
+					 sirius_panels[i].name);
+				return &sirius_panels[i];
+			}
+		}
+
+		dev_err(dev, "unknown variant \"%s\"\n", sirius_variant_param);
+		return ERR_PTR(-EINVAL);
+	}
+
+	variant = (uintptr_t)of_device_get_match_data(dev);
+	if (variant == SIRIUS_AUTO)
+		return sirius_panel_detect(dev);
+
+	return &sirius_panels[variant];
+}
+
+static int sirius_panel_probe(struct mipi_dsi_device *dsi)
+{
+	struct device *dev = &dsi->dev;
+	struct sirius_panel *ctx;
+	int ret;
+
+	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->desc = sirius_panel_select(dev);
+	if (IS_ERR(ctx->desc))
+		return PTR_ERR(ctx->desc);
+
+	dev_info(dev, "panel variant: %s\n", ctx->desc->name);
+
+	ctx->vddio = devm_regulator_get(dev, "vddio");
+	if (IS_ERR(ctx->vddio))
+		return dev_err_probe(dev, PTR_ERR(ctx->vddio),
+				     "failed to get vddio regulator\n");
+
+	ctx->vsp = devm_regulator_get(dev, "vsp");
+	if (IS_ERR(ctx->vsp))
+		return dev_err_probe(dev, PTR_ERR(ctx->vsp),
+				     "failed to get vsp regulator\n");
+
+	/* Hold the panel in reset until prepare() runs the power-on sequence */
+	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(ctx->reset_gpio))
+		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
+				     "failed to get reset GPIO\n");
+
+	ctx->dsi = dsi;
+	mipi_dsi_set_drvdata(dsi, ctx);
+
+	/*
+	 * qcom,mdss-dsi-traffic-mode = "non_burst_sync_event" (neither BURST
+	 * nor SYNC_PULSE), qcom,mdss-dsi-h-sync-pulse = <1> (HSE), no
+	 * qcom,mdss-dsi-force-clock-lane-hs (non-continuous clock), EOT
+	 * packets appended.
+	 */
+	dsi->lanes = 4;
+	dsi->format = MIPI_DSI_FMT_RGB888;
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_HSE |
+			  MIPI_DSI_CLOCK_NON_CONTINUOUS;
+
+	drm_panel_init(&ctx->panel, dev, &sirius_panel_funcs,
+		       DRM_MODE_CONNECTOR_DSI);
+	ctx->panel.prepare_prev_first = true;
+
+	ret = drm_panel_of_backlight(&ctx->panel);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to get backlight\n");
+
+	drm_panel_add(&ctx->panel);
+
+	ret = mipi_dsi_attach(dsi);
+	if (ret < 0) {
+		drm_panel_remove(&ctx->panel);
+		return dev_err_probe(dev, ret, "failed to attach to DSI host\n");
+	}
+
+	return 0;
+}
+
+static void sirius_panel_remove(struct mipi_dsi_device *dsi)
+{
+	struct sirius_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	int ret;
+
+	ret = mipi_dsi_detach(dsi);
+	if (ret < 0)
+		dev_err(&dsi->dev, "failed to detach from DSI host: %d\n", ret);
+
+	drm_panel_remove(&ctx->panel);
+}
+
+static const struct of_device_id sirius_panel_of_match[] = {
+	{ .compatible = "sony,sirius-panel",
+	  .data = (void *)SIRIUS_AUTO },
+	{ .compatible = "sony,sirius-panel-renesas-sharp",
+	  .data = (void *)SIRIUS_RENESAS_SHARP },
+	{ .compatible = "sony,sirius-panel-renesas-auo",
+	  .data = (void *)SIRIUS_RENESAS_AUO },
+	{ .compatible = "sony,sirius-panel-renesas-jdi",
+	  .data = (void *)SIRIUS_RENESAS_JDI },
+	{ .compatible = "sony,sirius-panel-novatek-jdi",
+	  .data = (void *)SIRIUS_NOVATEK_JDI },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, sirius_panel_of_match);
+
+static struct mipi_dsi_driver sirius_panel_driver = {
+	.probe = sirius_panel_probe,
+	.remove = sirius_panel_remove,
+	.driver = {
+		.name = "panel-sony-sirius",
+		.of_match_table = sirius_panel_of_match,
+	},
+};
+module_mipi_dsi_driver(sirius_panel_driver);
+
+MODULE_AUTHOR("Rob Watson <rob@mediaeden.com>");
+MODULE_DESCRIPTION("DRM panel driver for the Sony Xperia Z2 (sirius) LCD panels");
+MODULE_LICENSE("GPL");

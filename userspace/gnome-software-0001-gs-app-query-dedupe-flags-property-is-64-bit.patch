@@ -1,0 +1,55 @@
+From: Rob Watson <rob@mediaeden.com>
+Subject: [PATCH] gs-app-query: make the dedupe-flags property a guint64
+
+GsAppListFilterFlags is deliberately a 64-bit enum (its MASK member is
+G_MAXUINT64 and gs-app-list.h static-asserts sizeof == sizeof (guint64)),
+so every gs_app_query_new() caller pushes a 64-bit value for
+"dedupe-flags". The property itself, however, is registered with
+g_param_spec_flags(), whose GValue collector reads a 32-bit int.
+
+On 64-bit ABIs that mismatch goes unnoticed. On 32-bit ARM the 64-bit
+argument is 8-byte aligned, so g_object_new_valist() reads the padding
+slot as the value and the real value as the next property name, and
+gnome-software segfaults in g_param_spec_pool_lookup() as soon as the
+overview page is loaded (observed on postmarketOS armv7 with 50.3;
+same symptom as https://gitlab.gnome.org/GNOME/gnome-software/-/issues/1007).
+
+Register the property as a guint64, matching the header's contract.
+
+--- a/lib/gs-app-query.c
++++ b/lib/gs-app-query.c
+@@ -251,7 +251,7 @@
+ 		g_value_set_uint (value, self->max_results);
+ 		break;
+ 	case PROP_DEDUPE_FLAGS:
+-		g_value_set_flags (value, self->dedupe_flags);
++		g_value_set_uint64 (value, self->dedupe_flags);
+ 		break;
+ 	case PROP_SORT_FUNC:
+ 		g_value_set_pointer (value, self->sort_func);
+@@ -358,7 +358,7 @@
+ 	case PROP_DEDUPE_FLAGS:
+ 		/* Construct only. */
+ 		g_assert (self->dedupe_flags == 0);
+-		self->dedupe_flags = g_value_get_flags (value);
++		self->dedupe_flags = g_value_get_uint64 (value);
+ 		break;
+ 	case PROP_SORT_FUNC:
+ 		/* Construct only. */
+@@ -604,11 +604,11 @@
+ 	 * Since: 43
+ 	 */
+ 	props[PROP_DEDUPE_FLAGS] =
+-		g_param_spec_flags ("dedupe-flags", "Dedupe Flags",
+-				    "Flags to specify how to deduplicate the returned apps, if at all.",
+-				    GS_TYPE_APP_LIST_FILTER_FLAGS, GS_APP_LIST_FILTER_FLAG_NONE,
+-				    G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY |
+-				    G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
++		g_param_spec_uint64 ("dedupe-flags", "Dedupe Flags",
++				     "Flags to specify how to deduplicate the returned apps, if at all.",
++				     0, G_MAXUINT64, GS_APP_LIST_FILTER_FLAG_NONE,
++				     G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY |
++				     G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
+ 
+ 	/**
+ 	 * GsAppQuery:sort-func: (nullable)

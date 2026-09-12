@@ -1,0 +1,157 @@
+Subject: [PATCH] power: supply: generic-adc-battery: estimate capacity from the OCV table
+
+The driver reports voltage, current, power and temperature but no
+capacity, so user space (upower) has no state of charge to show. When the
+monitored battery provides an OCV table, add a CAPACITY property that
+maps the measured voltage through power_supply_batinfo_ocv2cap(). Without
+a coulomb counter this is an estimate: it reads low under load and high
+while charging, but it is far better than nothing on boards whose only
+battery instrumentation is a PMIC ADC (Sony Xperia Z2, PM8941).
+
+The Qualcomm SPMI ADCs report processed voltages in microvolts rather
+than the millivolts the IIO ABI specifies, so also keep a voltage that is
+obviously already in microvolts instead of scaling it again.
+
+The charging status relied on power_supply_am_i_supplied(), which needs a
+supplier relationship. That cannot be expressed for chargers registering
+several supplies on one firmware node (qcom_smbb: smbb-bif, smbb-usbin,
+smbb-dcin share the charger node, and the core keeps only one name per
+phandle), so also accept power_supply_is_system_supplied(). Poll the ADC
+every 10 s and notify user space when the status or the capacity changes,
+since no charger event can be relied on.
+
+diff -Nur a/drivers/power/supply/generic-adc-battery.c b/drivers/power/supply/generic-adc-battery.c
+--- a/drivers/power/supply/generic-adc-battery.c	2026-09-11 07:50:48.193923240 +0100
++++ b/drivers/power/supply/generic-adc-battery.c	2026-09-11 09:54:04.510409803 +0100
+@@ -48,6 +48,8 @@
+ 	struct delayed_work bat_work;
+ 	int status;
+ 	struct gpio_desc *charge_finished;
++	struct power_supply_battery_info *bat_info;
++	int last_capacity;
+ };
+ 
+ static struct gab *to_generic_bat(struct power_supply *psy)
+@@ -62,8 +64,11 @@
+ 	schedule_delayed_work(&adc_bat->bat_work, msecs_to_jiffies(0));
+ }
+ 
++#define GAB_POLL_MS	10000
++
+ static const enum power_supply_property gab_props[] = {
+ 	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CAPACITY,
+ };
+ 
+ /*
+@@ -90,10 +95,21 @@
+ 	int ret;
+ 
+ 	ret = iio_read_channel_processed(adc_bat->channel[channel], result);
+-	if (ret < 0)
++	if (ret < 0) {
+ 		dev_err(&adc_bat->psy->dev, "read channel error: %d\n", ret);
+-	else
+-		*result *= 1000;
++		return ret;
++	}
++
++	/*
++	 * IIO processed voltages are in millivolts, which the power supply
++	 * class wants in microvolts. The Qualcomm SPMI ADCs (qcom-spmi-vadc
++	 * and friends) report microvolts instead; a battery voltage above
++	 * 100 V in millivolt terms can only be one of those, so keep it.
++	 */
++	if (channel == GAB_VOLTAGE && abs(*result) > 100000)
++		return 0;
++
++	*result *= 1000;
+ 
+ 	return ret;
+ }
+@@ -102,6 +118,7 @@
+ 		enum power_supply_property psp, union power_supply_propval *val)
+ {
+ 	struct gab *adc_bat = to_generic_bat(psy);
++	int ret;
+ 
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+@@ -109,6 +126,26 @@
+ 		return 0;
+ 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+ 		return gab_read_channel(adc_bat, GAB_VOLTAGE, &val->intval);
++	case POWER_SUPPLY_PROP_CAPACITY: {
++		int uv, cap;
++
++		/*
++		 * Estimate the state of charge from the terminal voltage using
++		 * the OCV table of the monitored battery. Without a coulomb
++		 * counter this is only an estimate: it reads low under load
++		 * and high while charging.
++		 */
++		if (!adc_bat->bat_info)
++			return -ENODATA;
++		ret = gab_read_channel(adc_bat, GAB_VOLTAGE, &uv);
++		if (ret < 0)
++			return ret;
++		cap = power_supply_batinfo_ocv2cap(adc_bat->bat_info, uv, 25);
++		if (cap < 0)
++			return cap;
++		val->intval = cap;
++		return 0;
++	}
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+ 		return gab_read_channel(adc_bat, GAB_CURRENT, &val->intval);
+ 	case POWER_SUPPLY_PROP_POWER_NOW:
+@@ -130,15 +167,36 @@
+ 	adc_bat = container_of(delayed_work, struct gab, bat_work);
+ 	status = adc_bat->status;
+ 
+-	if (!power_supply_am_i_supplied(adc_bat->psy))
++	/*
++	 * power_supply_am_i_supplied() needs a supplier relationship, which
++	 * cannot be expressed for chargers that register several supplies on
++	 * one firmware node (qcom_smbb: smbb-bif, smbb-usbin, smbb-dcin), so
++	 * also accept any mains/USB supply being online. On a phone that is
++	 * the same thing.
++	 */
++	if (power_supply_am_i_supplied(adc_bat->psy) <= 0 &&
++	    power_supply_is_system_supplied() <= 0)
+ 		adc_bat->status =  POWER_SUPPLY_STATUS_DISCHARGING;
+ 	else if (gab_charge_finished(adc_bat))
+ 		adc_bat->status = POWER_SUPPLY_STATUS_NOT_CHARGING;
+ 	else
+ 		adc_bat->status = POWER_SUPPLY_STATUS_CHARGING;
+ 
++	if (adc_bat->bat_info) {
++		union power_supply_propval val;
++
++		if (!gab_get_property(adc_bat->psy, POWER_SUPPLY_PROP_CAPACITY, &val) &&
++		    val.intval != adc_bat->last_capacity) {
++			adc_bat->last_capacity = val.intval;
++			status = -1;	/* force a notification */
++		}
++	}
++
+ 	if (status != adc_bat->status)
+ 		power_supply_changed(adc_bat->psy);
++
++	/* No charger events can be relied on; poll the ADC instead. */
++	schedule_delayed_work(&adc_bat->bat_work, msecs_to_jiffies(GAB_POLL_MS));
+ }
+ 
+ static irqreturn_t gab_charged(int irq, void *dev_id)
+@@ -249,6 +307,12 @@
+ 			return dev_err_probe(&pdev->dev, ret, "Failed to register irq\n");
+ 	}
+ 
++	adc_bat->last_capacity = -1;
++	if (power_supply_get_battery_info(adc_bat->psy, &adc_bat->bat_info)) {
++		dev_info(&pdev->dev, "no monitored battery, capacity not reported\n");
++		adc_bat->bat_info = NULL;
++	}
++
+ 	platform_set_drvdata(pdev, adc_bat);
+ 
+ 	/* Schedule timer to check current status */
