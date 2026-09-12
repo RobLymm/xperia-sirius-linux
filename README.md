@@ -49,7 +49,8 @@ registers read fine.
     upstream/           a mainline-style device tree, for submission
     userspace/          fixes needed on 32-bit ARM that are not Z2 specific
     tools/              build a boot image, compile a device tree on the phone
-    docs/               identification, extraction, and what each unfinished part costs
+    docs/               identification, extraction, prior art, and what each
+                        unfinished part costs
 
 ## Two device trees, and why
 

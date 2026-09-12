@@ -68,6 +68,28 @@ the chip does not answer on either polarity, that rail is the next thing to
 look at: it may need to be driven, or described as a fixed regulator that the
 node consumes.
 
+## Someone tried this before
+
+Luca Weiss wrote the same node in April 2020, on branch
+`qcom-msm8974-5.6.y-sirius-nfc` of `msm8974-mainline/linux`, commit 8620821c0,
+"[WIP] ARM: dts: msm8974-sirius: add support for NFC". It never left that
+branch and is not in the current 6.16 tree, so it was not finished — but it
+corroborates the wiring independently:
+
+- same bus, `i2c@f9928000`
+- same `interrupts = <24 IRQ_TYPE_EDGE_RISING>`
+- same `enable-gpios = <&pm8941_mpps 2 GPIO_ACTIVE_LOW>`, carrying the comment
+  `// or GPIO_ACTIVE_HIGH ?`, which is the same open question recorded above
+- same `firmware-gpios = <&msmgpio 57 GPIO_ACTIVE_HIGH>`
+- the same instinct about PVDD: `// nxp,pvdd_en ... regulator-fixed with gpio?`
+
+Two differences, both deliberate. That version used the generic
+`nxp,nxp-nci-i2c` compatible; the binding has since gained `nxp,pn547` by
+name, so the node above uses both. And it defined an `i2c6_pins` pinctrl state
+by hand, which current mainline no longer needs: `qcom-msm8974.dtsi` defines
+`blsp1_i2c6_default` and `blsp1_i2c6_sleep` and the bus node already
+references them.
+
 ## Testing it
 
 Needs `CONFIG_NFC_NXP_NCI` and `CONFIG_NFC_NXP_NCI_I2C`, plus `CONFIG_NFC`
