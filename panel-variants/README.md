@@ -110,6 +110,14 @@ pm8941_l2, vdd pm8941_lvs3 and vddio pm8941_l12. The panel node itself takes
 vddio pm8941_lvs3 and vsp from vreg_vsp, the LCD DCDC regulator that pm8941
 gpio20 enables. See ../sirius-display.dtsi.
 
+## Drivers generated from this data
+
+`generated/` holds a DRM panel driver for each of the six, produced from these
+nodes with `linux-mdss-dsi-panel-driver-generator`. The one that can be
+checked — JDI on Novatek — matches the hand-written, hardware-verified driver
+byte for byte, which is the evidence for trusting the other five. None has
+been run. See `generated/README.md`.
+
 ## Wider than the Z2
 
 The shinano family (Z2 sirius, Z3 leo, Z3 Compact aries, Z2 Tablet castor)

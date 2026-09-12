@@ -20,7 +20,7 @@ apply to all four devices, not only the Z2.
 
 | Subsystem | State | Where |
 |---|---|---|
-| Display | Working. Six panel variants, selected at runtime | `drivers/panel/`, `panel-variants/` |
+| Display | Working. Six panel variants, selected at runtime; generated drivers for all six | `drivers/panel/`, `panel-variants/` |
 | Touch | Working. Maxim MAX1187x, out-of-tree driver, Sony's binding | `devicetree/` |
 | Wi-Fi, Bluetooth | Working | in-tree drivers, device tree only |
 | GPU | Working for the compositor. Adreno 330 via freedreno, needs a VRAM carveout | `docs/known-problems.md` |
@@ -46,7 +46,8 @@ registers read fine.
     drivers/audio/      ASoC machine driver for the msm8974 sound card
     drivers/battery/    VADC scaling and OCV capacity estimation patches
     drivers/fm/         V4L2 radio driver for the WCNSS tuner, untested
-    panel-variants/     the six panel configurations extracted from stock
+    panel-variants/     the six panel configurations extracted from stock,
+                        and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs
     upstream/           a mainline-style device tree, for submission
     userspace/          the ALSA UCM profile, and fixes for 32-bit ARM
