@@ -107,7 +107,9 @@ Out of tree, against a tree that has had `make modules_prepare` run:
     make KDIR=~/kbuild/linux-6.16.12
 
 `modules_prepare` alone is enough to compile. Linking a loadable `.ko` also
-needs `Module.symvers`, which only a full kernel build produces. In tree it wants a Kconfig entry:
+needs `Module.symvers`, which only a full kernel build produces.
+
+In tree it wants a Kconfig entry:
 
 ```
 config RADIO_WCNSS_FM
