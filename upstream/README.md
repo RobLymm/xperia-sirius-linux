@@ -25,6 +25,23 @@ modem and ADSP remoteproc, keys, vibrator, USB and the regulators. It has **no
 display, no GPU, no audio and no sensors**, so those four gaps are open for the
 whole family, not just the Z2.
 
+## Relationship to the board file
+
+`../devicetree/qcom-msm8974pro-sony-xperia-sirius.dts` is the tree the phone
+actually boots — 455 lines, everything working, built on the same
+`shinano-common.dtsi`. The file in this directory is a deliberate **subset**
+of that: only the parts whose drivers and bindings are already upstream, so
+that it compiles against mainline and can be submitted without depending on
+anything out of tree.
+
+Do not submit the board file. It references `sony,sirius-panel`, the MAX1187x
+touch controller and the msm8974 sound card, none of which exist upstream yet.
+Do not flash this one. Keep both, and keep the distinction explicit, or
+somebody will send the wrong file.
+
+Where the two disagree the board file wins: it has been booted and this has
+not.
+
 ## qcom-msm8974pro-sony-xperia-shinano-sirius.dts
 
 Written in the same shape as leo.dts: include the common dtsi, then only the

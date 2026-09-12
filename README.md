@@ -47,7 +47,7 @@ registers read fine.
     drivers/battery/    VADC scaling and OCV capacity estimation patches
     drivers/fm/         V4L2 radio driver for the WCNSS tuner, untested
     panel-variants/     the six panel configurations extracted from stock
-    devicetree/         the device tree that actually runs on the phone
+    devicetree/         the board device tree the phone actually runs
     upstream/           a mainline-style device tree, for submission
     userspace/          fixes needed on 32-bit ARM that are not Z2 specific
     tools/              build a boot image, compile a device tree on the phone
@@ -56,11 +56,12 @@ registers read fine.
 
 ## Two device trees, and why
 
-`devicetree/sirius-working.dts` is what runs. It is a **decompiled** Xperia Z3
-tree with the Z2's differences grafted on, so it uses numeric phandles rather
-than labels and is not pleasant to read. It is here because it is the tree
-that is known to boot, and because it is the reference for anything you want
-to check against real hardware.
+`devicetree/qcom-msm8974pro-sony-xperia-sirius.dts` is what runs: 455 lines of
+labelled source on top of mainline's `shinano-common.dtsi`, with every
+peripheral the Z2 differs on described properly. It replaced a 3,423 line
+decompiled tree, and converting it exposed three real defects the flattened
+form had been hiding — an undeclared regulator the sensors depend on, the
+Z3's charging limits, and two stale phandles. See `devicetree/README.md`.
 
 `upstream/qcom-msm8974pro-sony-xperia-shinano-sirius.dts` is the same device
 expressed the way mainline wants it: include the shared dtsi, add only the

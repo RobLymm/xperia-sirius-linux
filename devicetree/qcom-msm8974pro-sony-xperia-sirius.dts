@@ -1,0 +1,464 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Sony Xperia Z2 (sirius).
+ *
+ * The Z2 belongs to Sony's Rhine family, but its own device tree
+ * (qcom-msm8974-sony-xperia-sirius.dts) does not boot: it hangs before USB
+ * comes up and the cause has not been identified. This file is built on the
+ * Shinano common tree, which does boot on this hardware, with the Z2's own
+ * peripherals described on top. That is a deliberate compromise and should be
+ * revisited if the Rhine tree is ever made to work.
+ *
+ * Working from this: display (JDI panel on a Novatek driver IC), touch
+ * (MAX1187x), Bluetooth (BCM4335C0 on blsp2_uart1), GPU (Adreno 330), audio
+ * (QDSP6 out to two TFA9890 amplifiers), battery gauge, and the sensor set.
+ */
+
+#include "qcom-msm8974pro-sony-xperia-shinano-common.dtsi"
+
+/ {
+	model = "Sony Xperia Z2";
+	compatible = "sony,xperia-sirius", "qcom,msm8974pro", "qcom,msm8974";
+	chassis-type = "handset";
+
+	/* The Z2 has a two-stage camera button, as the Z3 does. */
+	gpio-keys {
+		key-camera-snapshot {
+			label = "camera_snapshot";
+			gpios = <&pm8941_gpios 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_CAMERA>;
+			debounce-interval = <15>;
+		};
+
+		key-camera-focus {
+			label = "camera_focus";
+			gpios = <&pm8941_gpios 4 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_CAMERA_FOCUS>;
+			debounce-interval = <15>;
+		};
+	};
+
+	sirius_battery: battery {
+		compatible = "simple-battery";
+		voltage-min-design-microvolt = <0x30d400>;
+		voltage-max-design-microvolt = <0x426030>;
+		charge-full-design-microamp-hours = <0x30d400>;
+		ocv-capacity-celsius = <0x19>;
+		ocv-capacity-table-0 = <0x426030 0x64>, <0x4175d0 0x5f>, <0x40b280 0x5a>, <0x3fef30 0x55>, <0x3f2be0 0x50>, <0x3e6890 0x4b>, <0x3da540 0x46>, <0x3ce1f0 0x41>, <0x3c45b0 0x3c>, <0x3ba970 0x37>, <0x3b0d30 0x32>, <0x3a9800 0x2d>, <0x3a49e0 0x28>, <0x39fbc0 0x23>, <0x39ada0 0x1e>, <0x395f80 0x19>, <0x391160 0x14>, <0x389c30 0xf>, <0x382700 0xa>, <0x373ca0 0x5>, <0x33e140 0x0>;
+	};
+
+	fuel-gauge {
+		compatible = "adc-battery";
+		io-channels = <&pm8941_vadc 0x06>;
+		io-channel-names = "voltage";
+		monitored-battery = <&sirius_battery>;
+	};
+};
+
+/*
+ * Touch. The Z3 carries a Synaptics RMI4 part at 0x2c on this bus; the Z2 has
+ * a Maxim MAX1187x at 0x48, on the same interrupt and supply.
+ */
+&blsp2_i2c2 {
+	/delete-node/ synaptics@2c;
+
+	maxim_max1187x_tsc@48 {
+		compatible = "maxim,max1187x_tsc";
+		reg = <0x48>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <86 0x2>;
+		vdd-supply = <&pm8941_l22>;
+		touch_vdd-supply_name = "vdd";
+		tirq-gpio = <&tlmm 86 0x2>;
+		reset-gpio = <&tlmm 85 0x2>;
+		reset_l2h = <1>;
+		enable_resume_por = <1>;
+		defaults_allow = <0>;
+		default_config_id = <0>;
+		default_chip_id = <0>;
+		fw_name = "touch_chip_id_0x%02x_config_id_0x%%04x.bin";
+		i2c_words = <128>;
+		coordinate_settings = <0x4>;
+		panel_margin_xl = <0>;
+		lcd_x = <1080>;
+		panel_margin_xh = <0>;
+		panel_margin_yl = <0>;
+		lcd_y = <1920>;
+		panel_margin_yh = <0>;
+		num_sensor_x = <20>;
+		num_sensor_y = <34>;
+		button_code0 = <0>;
+		button_code1 = <0>;
+		button_code2 = <0>;
+		button_code3 = <0>;
+		touch_pressure_enabled = <1>;
+		touch_size_enabled = <0>;
+		touch_orientation_enabled = <0>;
+		glove_enabled = <0>;
+		report_pen_as_finger = <1>;
+		wakeup_gesture_support = <1>;
+		wakeup_gesture_timeout = <2000>;
+		wakeup_gesture {
+			double_tap {
+				gesture_code = <0x0102>;
+				event_00 {
+					type = <2>; /* LOG */
+					message = "=== DOUBLE TAP ===";
+				};
+				event_01 {
+					type = <1>; /* KEY */
+					code = <116>; /* KEY_POWER */
+					down = <1>;
+				};
+				event_02 {
+					type = <1>; /* KEY */
+					code = <116>; /* KEY_POWER */
+					down = <0>;
+				};
+				event_03 {
+					type = <99>; /* END */
+				};
+			};
+		};
+	};
+};
+
+/* Speaker amplifiers: two mono TFA9890s, one per channel. */
+&blsp2_i2c5 {
+	status = "okay";
+
+	speaker_left: amplifier@34 {
+		compatible = "nxp,tfa9890";
+		reg = <0x34>;
+		#sound-dai-cells = <0x00>;
+		sound-name-prefix = "Speaker Top";
+	};
+
+	speaker_right: amplifier@35 {
+		compatible = "nxp,tfa9890";
+		reg = <0x35>;
+		#sound-dai-cells = <0x00>;
+		sound-name-prefix = "Speaker Bottom";
+	};
+};
+
+/* Sensors. */
+&blsp2_i2c6 {
+	status = "okay";
+
+	accelerometer@18 {
+		compatible = "bosch,bma255";
+		reg = <0x18>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x49 0x01>;
+		vdd-supply = <&pm8941_l17>;
+		vddio-supply = <&pm8941_lvs1>;
+		mount-matrix = "0", "-1", "0",
+			       "1", "0", "0",
+			       "0", "0", "1";
+	};
+
+	gyroscope@68 {
+		compatible = "bosch,bmg160";
+		reg = <0x68>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x42 0x01>;
+		vdd-supply = <&pm8941_l17>;
+		vddio-supply = <&pm8941_lvs1>;
+		mount-matrix = "0", "-1", "0",
+			       "1", "0", "0",
+			       "0", "0", "1";
+	};
+
+	light-sensor@39 {
+		compatible = "avago,apds9930";
+		reg = <0x39>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x4a 0x02>;
+		vdd-supply = <&pm8941_l17>;
+		vddio-supply = <&pm8941_lvs1>;
+	};
+
+	magnetometer@c {
+		compatible = "asahi-kasei,ak09911";
+		reg = <0x0c>;
+		vdd-supply = <&pm8941_l17>;
+		vid-supply = <&pm8941_lvs1>;
+		mount-matrix = "0", "0", "1",
+			       "0", "-1", "0",
+			       "1", "0", "0";
+	};
+
+	pressure@76 {
+		compatible = "bosch,bmp280";
+		reg = <0x76>;
+		vddd-supply = <&pm8941_l17>;
+		vdda-supply = <&pm8941_lvs1>;
+	};
+};
+
+/* Bluetooth: the BCM4339 combo chip's Bluetooth core, on the UART. */
+&blsp2_uart1 {
+	status = "okay";
+
+	bluetooth {
+		pinctrl-0 = <&bt_host_wake_pin>, <&bt_dev_wake_pin>, <&bt_reg_on_pin>;
+		pinctrl-names = "default";
+		compatible = "brcm,bcm43438-bt";
+		max-speed = <0x2dc6c0>;
+		host-wakeup-gpios = <&tlmm 0x5f 0x00>;
+		device-wakeup-gpios = <&tlmm 0x60 0x00>;
+		shutdown-gpios = <&pm8941_gpios 0x10 0x00>;
+	};
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	status = "okay";
+
+	vdda-supply = <&pm8941_l2>;
+	vdd-supply = <&pm8941_lvs3>;
+	vddio-supply = <&pm8941_l12>;
+
+	panel: panel@0 {
+		compatible = "sony,sirius-panel";
+		reg = <0x00>;
+		vddio-supply = <&pm8941_lvs3>;
+		vsp-supply = <&vreg_vsp>;
+		reset-gpios = <&pm8941_gpios 0x13 0x01>;
+		backlight = <&pm8941_wled>;
+		pinctrl-0 = <&lcd_reset_pin>;
+		pinctrl-names = "default";
+
+		port {
+
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	remote-endpoint = <&panel_in>;
+	data-lanes = <0 1 2 3>;
+};
+
+&mdss_dsi0_phy {
+	status = "okay";
+	vddio-supply = <&pm8941_l12>;
+};
+
+&gpu {
+	status = "okay";
+};
+
+/* Backlight: PM8941 WLED driving two strings. */
+&pm8941_wled {
+	status = "okay";
+
+	qcom,cs-out;
+	qcom,current-limit = <20>;
+	qcom,current-boost-limit = <805>;
+	qcom,switching-freq = <1600>;
+	qcom,ovp = <29>;
+	qcom,num-strings = <2>;
+};
+
+&pm8941_gpios {
+	bt_reg_on_pin: bt-reg-on-state {
+		pins = "gpio16";
+		function = "normal";
+		output-low;
+		power-source = <0x02>;
+	};
+
+	lcd_reset_pin: lcd-reset-state {
+		pins = "gpio19";
+		function = "normal";
+		bias-disable;
+		power-source = <0x02>;
+		input-disable;
+		output-high;
+	};
+};
+
+&tlmm {
+	bt_dev_wake_pin: bt-dev-wake-state {
+		pins = "gpio96";
+		function = "gpio";
+		drive-strength = <0x02>;
+		bias-disable;
+	};
+
+	bt_host_wake_pin: bt-host-wake-state {
+		pins = "gpio95";
+		function = "gpio";
+		drive-strength = <0x02>;
+		bias-disable;
+		output-low;
+	};
+
+	quat_mi2s_default: quat-mi2s-default-state {
+		pins = "gpio58", "gpio59", "gpio60", "gpio61";
+		function = "qua_mi2s";
+		drive-strength = <0x08>;
+		bias-disable;
+	};
+};
+
+/* Audio: QDSP6 on the ADSP, Quaternary MI2S out to the amplifiers. */
+&remoteproc_adsp {
+	status = "okay";
+
+	smd-edge {
+		apr {
+			compatible = "qcom,apr-v2";
+			qcom,smd-channels = "apr_audio_svc";
+			qcom,domain = <0x04>;
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+
+			service@3 {
+				compatible = "qcom,q6core";
+				reg = <0x03>;
+			};
+
+			service@4 {
+				compatible = "qcom,q6afe";
+				reg = <0x04>;
+
+				q6afedai: dais {
+					compatible = "qcom,q6afe-dais";
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					#sound-dai-cells = <0x01>;
+
+					dai@22 {
+						reg = <0x16>;
+						qcom,sd-lines = <0x00>;
+					};
+				};
+			};
+
+			service@7 {
+				compatible = "qcom,q6asm";
+				reg = <0x07>;
+
+				q6asmdai: dais {
+					compatible = "qcom,q6asm-dais";
+					#address-cells = <0x01>;
+					#size-cells = <0x00>;
+					#sound-dai-cells = <0x01>;
+
+					dai@0 {
+						reg = <0x00>;
+					};
+				};
+			};
+
+			service@8 {
+				compatible = "qcom,q6adm";
+				reg = <0x08>;
+
+				q6routing: routing {
+					compatible = "qcom,q6adm-routing";
+					#sound-dai-cells = <0x00>;
+				};
+			};
+		};
+	};
+};
+
+&soc {
+	sound@fe02f000 {
+		compatible = "qcom,msm8974-sndcard";
+		reg = <0xfe02f000 0x04>;
+		reg-names = "lpaif_quat_mode_muxsel";
+		model = "Sony Xperia Z2";
+		pinctrl-names = "default";
+		pinctrl-0 = <&quat_mi2s_default>;
+
+		mm1-dai-link {
+			link-name = "MultiMedia1";
+
+			cpu {
+				sound-dai = <&q6asmdai 0x00>;
+			};
+		};
+
+		quat-mi2s-dai-link {
+			link-name = "Quaternary MI2S Playback";
+
+			cpu {
+				sound-dai = <&q6afedai 0x16>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+
+			codec {
+				sound-dai = <&speaker_left>, <&speaker_right>;
+			};
+		};
+	};
+};
+
+/*
+ * Rails the Z2 needs held on that the Shinano common tree does not mark.
+ * lvs1 is not declared there at all; the sensors on blsp2_i2c6 run from it.
+ */
+&rpm_requests {
+	regulators-1 {
+		pm8941_lvs1: lvs1 {
+			regulator-always-on;
+		};
+	};
+};
+
+&pm8941_l16 {
+	regulator-always-on;
+};
+
+&pm8941_l17 {
+	regulator-always-on;
+};
+
+&pm8941_l18 {
+	regulator-always-on;
+};
+
+/*
+ * Charger. Values taken from Sony's own device tree for this device
+ * (qcom,charger in the stock kernel), not from the Z3:
+ *
+ *   qcom,ibatmax-ma        1600   -> fast-charge-current-limit
+ *   qcom,ibatsafe-ma       1600   -> fast-charge-safe-current
+ *   qcom,vddmax-mv         4350   -> fast-charge-high-threshold-voltage
+ *   qcom,vddsafe-mv        4400   -> fast-charge-safe-voltage
+ *   qcom,vinmin-mv         4200   -> minimum-input-voltage
+ *   qcom,maxinput-usb-ma   1500   -> usb-charge-current-limit
+ *   qcom,vbatdet-delta-mv    70   -> auto-recharge at vddmax - delta = 4280
+ *
+ * The Z3 values that were inherited before this were 2150 mA charge current
+ * against Sony's 1600, and a 3000 mA safety ceiling against Sony's 1600, into
+ * a 3200 mAh cell.
+ */
+&smbb {
+	status = "okay";
+
+	usb-charge-current-limit = <1500000>;
+	qcom,fast-charge-safe-current = <1600000>;
+	qcom,fast-charge-current-limit = <1600000>;
+	qcom,fast-charge-safe-voltage = <4400000>;
+	qcom,fast-charge-high-threshold-voltage = <4350000>;
+	qcom,auto-recharge-threshold-voltage = <4280000>;
+	qcom,minimum-input-voltage = <4200000>;
+};
+&gpio_keys_pin_a {
+	pins = "gpio2", "gpio3", "gpio4", "gpio5";
+};
