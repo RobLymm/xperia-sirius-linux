@@ -1,10 +1,17 @@
 # FM radio driver for the WCNSS tuner
 
 `radio-wcnss-fm.c` is a V4L2 radio driver for the FM receiver inside the
-WCN3680, written for this project. **It has never been run.** The phone was
-unreachable while it was written, so it has not been compiled against a kernel
-tree, loaded, or tested against hardware. Treat it as a first draft that is
-structurally complete, not as working code.
+WCN3680, written for this project.
+
+**It compiles cleanly and has never been run.** Built on the phone against a
+prepared 6.16.12 tree with the running kernel's own config:
+
+    CC [M]  radio-wcnss-fm.o
+
+No errors and no warnings, including at `W=1`. checkpatch is also clean. What
+that proves is that the driver is valid C against the real kernel API — every
+signature, every struct member, every header. It proves nothing about whether
+the hardware answers.
 
 It is here because FM was the one subsystem on this phone with no existing
 implementation anywhere: not in mainline, not in the msm8974-mainline fork,
@@ -65,10 +72,42 @@ The node goes under the WCNSS control node, beside the existing `bt` and
 
 No resources of its own: the channel comes from the parent.
 
+## It cannot load on the current kernel
+
+The module needs 41 symbols. All but the V4L2 core are already exported by the
+running kernel, including the two that matter most, `qcom_wcnss_open_channel`
+and `rpmsg_send` — `CONFIG_QCOM_WCNSS_CTRL=y` and `CONFIG_RPMSG=y` are set.
+
+What is missing is the whole media subsystem. The pmOS kernel for this device
+is built with no `CONFIG_MEDIA_SUPPORT` at all, so none of these exist:
+
+    __video_register_device   v4l2_device_register     v4l2_device_unregister
+    v4l2_ctrl_handler_init_class  v4l2_ctrl_handler_free   v4l2_ctrl_new_std
+    v4l2_ctrl_poll            v4l2_ctrl_log_status     v4l2_ctrl_subscribe_event
+    v4l2_event_unsubscribe    v4l2_fh_open             v4l2_fh_release
+    v4l2_fh_is_singular
+
+So loading it needs a kernel rebuild. The config additions are:
+
+    CONFIG_MEDIA_SUPPORT=m
+    CONFIG_MEDIA_RADIO_SUPPORT=y
+    CONFIG_RADIO_ADAPTERS=y
+    CONFIG_VIDEO_DEV=m
+    CONFIG_RADIO_WCNSS_FM=m
+
+Building the media core out of tree instead would work in principle but is
+not worth it: `CONFIG_MODVERSIONS=y` here, so every module has to match the
+running kernel's symbol CRCs, and the kernel exports none of these symbols to
+match against.
+
 ## Building it
 
-Out of tree it needs `CONFIG_QCOM_WCNSS_CTRL`, `CONFIG_RPMSG`, `CONFIG_VIDEO_DEV`
-and `CONFIG_RADIO_ADAPTERS`. In tree it wants a Kconfig entry:
+Out of tree, against a tree that has had `make modules_prepare` run:
+
+    make KDIR=~/kbuild/linux-6.16.12
+
+`modules_prepare` alone is enough to compile. Linking a loadable `.ko` also
+needs `Module.symvers`, which only a full kernel build produces. In tree it wants a Kconfig entry:
 
 ```
 config RADIO_WCNSS_FM
