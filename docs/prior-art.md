@@ -59,9 +59,9 @@ read off it directly:
 - **FM on the WCN3680 is "No driver"** for someone who has been working on this
   SoC for years. That corroborates FM being genuinely unwritten rather than
   merely hard to find.
-- Cameras are listed as "Working (WIP), out-of-tree". The msm8974 camss support
-  that implies is not in the 6.16 branch of the fork above, so it is somewhere
-  else and has not been located yet. Worth finding before anyone starts.
+- Cameras are listed as "Working (WIP), out-of-tree". That work is real and
+  was eventually found, in his own patch tree rather than the shared fork —
+  see below.
 
 His own patch tree, `z3ntu/linux`, has 60 branches and is where the msm8974
 camera work turned out to be: **`flto-msm8974-5.17-camera`**, covering CAMSS

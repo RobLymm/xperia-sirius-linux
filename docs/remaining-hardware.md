@@ -111,5 +111,6 @@ coprocessor, with downstream `radio-iris` as the only reference.
 2. **Modem** — one command, then diagnosis.
 3. **Suspend** — investigate two drivers.
 4. **Headphones** — forward-port an existing 7,000-line driver.
-5. **Camera** — add a camss variant, then identify and drive the sensors.
+5. **Camera** — forward-port existing msm8974 camss and CCI work, then
+   identify and drive the two sensors.
 6. **FM** — a new driver against an undocumented interface.
