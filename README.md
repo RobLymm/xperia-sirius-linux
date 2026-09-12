@@ -30,7 +30,8 @@ apply to all four devices, not only the Z2.
 | Sensors | Working. Accelerometer, gyroscope, magnetometer, barometer, light and proximity | `upstream/` |
 | Modem | Boots, then stalls during initialisation | `docs/modem.md` |
 | Suspend and resume | Not working. Resume loses Wi-Fi and touch | `docs/known-problems.md` |
-| Camera, NFC, FM radio | Not attempted | — |
+| NFC | Not tested. NXP PN547; mainline driver exists, node written | `docs/nfc.md` |
+| FM radio, camera | Not attempted; both need drivers that do not exist upstream | `docs/remaining-hardware.md` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
@@ -48,7 +49,7 @@ registers read fine.
     upstream/           a mainline-style device tree, for submission
     userspace/          fixes needed on 32-bit ARM that are not Z2 specific
     tools/              build a boot image, compile a device tree on the phone
-    docs/               identification, extraction, and the unfinished parts
+    docs/               identification, extraction, and what each unfinished part costs
 
 ## Two device trees, and why
 
