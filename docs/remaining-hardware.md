@@ -88,22 +88,28 @@ What remains for this phone is the sensors: Sony hides the parts behind
 Sony flagship sensor. Full detail, the hardware table and the device tree node
 in `camera.md`.
 
-## FM radio — genuinely from scratch
+## FM radio — written from scratch, never run
 
-No correction to make here; this one is as bad as it looked.
+Nothing existed for this tuner anywhere: not mainline, not the msm8974 fork,
+and listed as "No driver" in the Fairphone 2 table. So it was written.
 
-`drivers/media/radio/Makefile` contains nothing for IRIS, WCNSS or Qualcomm.
-No out-of-tree port exists in the msm8974-mainline tree either. The tuner sits
-inside the WCN3680 alongside Wi-Fi and Bluetooth, reached through the pronto
-subsystem, and the downstream `radio-iris` driver was never upstreamed.
+`../drivers/fm/radio-wcnss-fm.c`, about 590 lines. The tuner is inside the
+WCN3680 and is reached over a single SMD channel, `APPS_FM`, on the WCNSS
+edge — the same mechanism `btqcomsmd` uses for Bluetooth, so the driver
+attaches as a platform device below the WCNSS control node and takes its
+channel from `qcom_wcnss_open_channel()`. The protocol came from the
+downstream `radio-iris` driver.
 
-Sony's tree shows only the audio side: `qcom,msm-dai-q6-int-fm-rx` and `-tx`,
-the ADSP routing that carries FM audio once a tuner exists. That routing is
-useful — it means the audio path is already understood — but it is the easy
-half.
+It implements enable, tune, station parameters, mute, mono/stereo and
+hardware seek. It has never been compiled against a kernel tree or loaded,
+because the phone was unreachable while it was written. `../drivers/fm/README.md`
+lists what to check first, in order of how likely each is to be wrong.
 
-Writing this means a V4L2 radio driver against an undocumented interface to a
-coprocessor, with downstream `radio-iris` as the only reference.
+One thing worth knowing before testing: the headphone lead is the aerial, so
+nothing will tune without headphones plugged in. And the driver controls only
+the tuner — audio needs the ADSP routing Sony exposes as
+`qcom,msm-dai-q6-int-fm-rx` wired into the sound card, so expect a working
+`/dev/radio0` and silence until that is done.
 
 ## Order worth doing them in
 
@@ -113,4 +119,5 @@ coprocessor, with downstream `radio-iris` as the only reference.
 4. **Headphones** — forward-port an existing 7,000-line driver.
 5. **Camera** — forward-port existing msm8974 camss and CCI work, then
    identify and drive the two sensors.
-6. **FM** — a new driver against an undocumented interface.
+6. **FM** — driver written; compile it, load it, and work down the list
+   in `../drivers/fm/README.md`.

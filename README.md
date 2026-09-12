@@ -32,7 +32,7 @@ apply to all four devices, not only the Z2.
 | Suspend and resume | Not working. Resume loses Wi-Fi and touch | `docs/known-problems.md` |
 | NFC | Not tested. NXP PN547; mainline driver exists, node written | `docs/nfc.md` |
 | Camera | Not attempted. ISP support exists for msm8974 elsewhere; the sensors need drivers | `docs/camera.md` |
-| FM radio | Not attempted. Nothing exists anywhere for the WCN3680 tuner | `docs/remaining-hardware.md` |
+| FM radio | Driver written, never run. Nothing else exists anywhere for this tuner | `drivers/fm/` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
@@ -45,6 +45,7 @@ registers read fine.
     drivers/panel/      DRM panel driver, all six Z2 panel variants
     drivers/audio/      ASoC machine driver for the msm8974 sound card
     drivers/battery/    VADC scaling and OCV capacity estimation patches
+    drivers/fm/         V4L2 radio driver for the WCNSS tuner, untested
     panel-variants/     the six panel configurations extracted from stock
     devicetree/         the device tree that actually runs on the phone
     upstream/           a mainline-style device tree, for submission
