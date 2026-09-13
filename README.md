@@ -36,10 +36,10 @@ the others listed there.
 | Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. Headphones, earpiece and microphones need the WCD9320 codec, for which a 4.18-era out-of-tree driver exists to port. `drivers/audio/`, `docs/remaining-hardware.md` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
 | Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
-| GPS | Not working | Depends on the modem |
-| Mobile data | Not working | The modem loads its firmware and then stalls during initialisation. `docs/modem.md` |
-| SMS | Not working | Depends on the modem |
-| Calls | Not working | Depends on the modem |
+| GPS | Not tested | Runs on the modem, which does not yet finish starting |
+| Mobile data | Not tested | The modem loads its firmware and then stalls during initialisation, so this cannot be tried yet. `docs/modem.md` |
+| SMS | Not tested | Needs the modem |
+| Calls | Not tested | Needs the modem. Calls and Chats are installed |
 | USB-OTG | Not tested | The USB controller is in OTG mode and the PM8941 ID detection is present; host mode has not been tried |
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
 | CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |
