@@ -2,12 +2,14 @@
 /*
  * Sony Xperia Z2 (sirius).
  *
- * The Z2 belongs to Sony's Rhine family, but its own device tree
- * (qcom-msm8974-sony-xperia-sirius.dts) does not boot: it hangs before USB
- * comes up and the cause has not been identified. This file is built on the
- * Shinano common tree, which does boot on this hardware, with the Z2's own
- * peripherals described on top. That is a deliberate compromise and should be
- * revisited if the Rhine tree is ever made to work.
+ * The Z2 is one of Sony's Shinano platform devices, with the Xperia Z3 (leo),
+ * Z3 Compact (aries) and Z2 Tablet (castor), so like them it is built on the
+ * Shinano common tree, with the Z2's own peripherals described on top.
+ *
+ * The msm8974-mainline fork also carries an older standalone tree for this
+ * phone, qcom-msm8974-sony-xperia-sirius.dts. It does not boot: it hangs
+ * before USB comes up and the cause has not been identified. This file does
+ * not use it.
  *
  * Working from this: display (JDI panel on a Novatek driver IC), touch
  * (MAX1187x), Bluetooth (BCM4335C0 on blsp2_uart1), GPU (Adreno 330), audio

@@ -24,7 +24,7 @@ NAME="${2:?usage: PHONE=<addr> $0 <kernel-tree> <out-name>}"
 : "${PHONE:?set PHONE to your phone's hostname or address}"
 TARGET="${PHONE_USER:-user}@$PHONE"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BOARD=qcom-msm8974pro-sony-xperia-sirius.dts
+BOARD=qcom-msm8974pro-sony-xperia-shinano-sirius.dts
 PRE=$(mktemp) || exit 1
 trap 'rm -f "$PRE"' EXIT
 

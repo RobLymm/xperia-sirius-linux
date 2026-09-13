@@ -27,7 +27,7 @@ whole family, not just the Z2.
 
 ## Relationship to the board file
 
-`../devicetree/qcom-msm8974pro-sony-xperia-sirius.dts` is the tree the phone
+`../devicetree/qcom-msm8974pro-sony-xperia-shinano-sirius.dts` is the tree the phone
 actually boots — 455 lines, everything working, built on the same
 `shinano-common.dtsi`. The file in this directory is a deliberate **subset**
 of that: only the parts whose drivers and bindings are already upstream, so
@@ -66,7 +66,7 @@ Deliberately left out, with the reason:
   piece of follow-up work and benefits the whole family.
 - **Touch.** The Z2's MAX1187x has no mainline driver and Sony's binding is
   nothing like a mainline one (see `touchscreen@48` in
-  ../devicetree/qcom-msm8974pro-sony-xperia-sirius.dts: dozens
+  ../devicetree/qcom-msm8974pro-sony-xperia-shinano-sirius.dts: dozens
   of vendor properties, a nested wakeup-gesture tree). Submitting the DTS with
   an undocumented compatible would be rejected, so the inherited Synaptics node
   is simply disabled.

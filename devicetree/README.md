@@ -1,6 +1,6 @@
 # The device tree that runs
 
-`qcom-msm8974pro-sony-xperia-sirius.dts` is what the phone boots: 529 lines of
+`qcom-msm8974pro-sony-xperia-shinano-sirius.dts` is what the phone boots: 529 lines of
 labelled source, built on mainline's `qcom-msm8974pro-sony-xperia-shinano-common.dtsi`
 with the Z2's own peripherals described on top. Display, audio, Bluetooth,
 touch, sensors, battery and GPU all work on it.
@@ -34,12 +34,25 @@ because nothing was referenced by label. Three real defects were hiding in it:
 The charging values were derived twice independently, once from Sony's stock
 FOTA device tree and once during the conversion, and agree on all seven.
 
-## The remaining Z3-ness
+## Why it is built on Shinano, and named after it
 
-The `#include` itself. Everything board-specific is now the Z2's; the base is
-Shinano because the Z2's own Rhine tree (`qcom-msm8974-sony-xperia-sirius.dts`
-in the msm8974-mainline fork) does not boot — it hangs before USB comes up and
-nobody has found out why. That is stated in the file header rather than hidden.
+Shinano is the name of Sony's 2014 hardware platform, and the Z2 is one of its
+devices, alongside the Z3 (leo), Z3 Compact (aries) and Z2 Tablet (castor).
+Including `qcom-msm8974pro-sony-xperia-shinano-common.dtsi` is therefore
+correct for the Z2, not something borrowed from the Z3. Everything
+board-specific in this file is the Z2's own.
+
+Mainline names these boards
+`qcom-msm8974pro-sony-xperia-shinano-<codename>.dts`, and this file follows
+that pattern, so the name written into postmarketOS's `deviceinfo_dtb` would
+not need to change if the tree reaches mainline. `../upstream/` holds a file
+of the same name: that is the subset of this tree that mainline can accept
+today.
+
+The msm8974-mainline fork also carries an older standalone tree for this
+phone, `qcom-msm8974-sony-xperia-sirius.dts`. It does not boot — it hangs
+before USB comes up and nobody has found out why — and this file does not
+use it.
 
 Thermal was checked and is not a concern: `shinano-common` has no thermal
 nodes at all, the trip points come from the SoC dtsi and are generic msm8974
@@ -84,7 +97,7 @@ goes in it.
   `#include` chain when it is built from the patched tree. CPU frequency
   scaling is done this way.
 - **Experimental variants** should `#include
-  "qcom-msm8974pro-sony-xperia-sirius.dts"` and change things through labels,
+  "qcom-msm8974pro-sony-xperia-shinano-sirius.dts"` and change things through labels,
   not copy the file. A copy stops receiving fixes made here. Once a variant
   is proven on the phone, fold it into this file and delete the variant.
 - **`../upstream/`** holds the subset intended for mainline and has never been

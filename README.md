@@ -73,7 +73,7 @@ registers read fine.
 
 ## Two device trees, and why
 
-`devicetree/qcom-msm8974pro-sony-xperia-sirius.dts` is what runs: 529 lines of
+`devicetree/qcom-msm8974pro-sony-xperia-shinano-sirius.dts` is what runs: 529 lines of
 labelled source on top of mainline's `shinano-common.dtsi`, with every
 peripheral the Z2 differs on described properly. It replaced a 3,423 line
 decompiled tree, and converting it exposed three real defects the flattened
