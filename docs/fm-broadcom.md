@@ -52,11 +52,15 @@ From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
 1. **Reception.** Plug in headphones, `bcm-fm.sh on`, `bcm-fm.sh sweep`, and
    look for RSSI and SNR peaks. BBC Radio 1 is on 97.6–99.8 MHz depending on
    region. RDS would then confirm the station by name without any audio.
-2. **Audio.** Sony's driver defaults to the analog DAC output of the Broadcom
-   chip, with I2S as an alternative. Which one the Z2's board actually wires,
-   and to what, decides whether sound can reach the speakers through the
-   existing QDSP6 path or needs the WCD9320 codec. Sony's stock mixer paths
-   are the place to find out.
+2. **Audio.** Sony's stock `/etc/mixer_paths.xml` answers the wiring question:
+   FM audio enters the DSP digitally on the LPASS *internal FM* port, as
+   `INTERNAL_FM_TX`, and stock Android plays it with
+   `SLIMBUS_0_RX Port Mixer INTERNAL_FM_TX` (to the WCD9320) or records it with
+   `MultiMedia1 Mixer INTERNAL_FM_TX`. So the Broadcom chip's I2S output
+   (AUD_CTL0 bit5) is the one in use, not its DAC. Mainline q6afe has no
+   internal FM port at all, so the step is to add `INT_FM_TX` (AFE port
+   0x3005) to q6afe and q6routing; capturing it on MultiMedia1 and playing it
+   through the working speaker path then needs no WCD9320.
 3. **A kernel driver.** Mainline has no Broadcom FM driver. Userspace control
    is enough to prove and use the tuner; a V4L2 driver over `btbcm` vendor
    commands, modelled on Sony's, is the eventual form.

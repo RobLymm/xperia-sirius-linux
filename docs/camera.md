@@ -23,7 +23,17 @@ Two sensors on the CCI bus:
     qcom,camera@20   rear   csiphy 0   4 rails inc. cam_vaf (autofocus)
     qcom,camera@6c   front  csiphy 2   3 rails, no autofocus
 
-both with `qcom,mount-angle = <0x10e>`, 270 degrees. Sony names them
+both with `qcom,mount-angle = <0x10e>`, 270 degrees.
+
+Sony's stock system partition narrows the parts down: tuning files
+`vendor/camera/SOI20BS0_IMX200.dat` (a 20 MP module) and
+`LGI02BN1_IMX132.dat` / `SEM02BN1_IMX132.dat` (2 MP modules from two
+suppliers), plus a leftover `libchromatix_imx135_liveshot.so`. So the rear is
+most likely an IMX200 and the front an IMX132, with the front module sourced
+from two vendors. The sensor ID registers will confirm once the CCI bus works.
+No mainline or out-of-tree driver was found for IMX200, IMX132 or IMX135; the
+nearest prior art is the IMX300 driver written by reverse-engineering Sony
+Xperia userspace sensor drivers. Sony names them
 `sony_camera_0` and `sony_camera_1` rather than giving part numbers, so
 identifying the actual sensors is a prerequisite. There is an EEPROM at 0xa0
 that should answer it on hardware.
