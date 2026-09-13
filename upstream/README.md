@@ -62,19 +62,20 @@ What it contains, and where each part came from:
 Deliberately left out, with the reason:
 
 - **Display.** Needs the panel driver, which is not upstream. Six panel
-  variants exist for this device; see ../panel/variants/. This is the largest
+  variants exist for this device; see ../panel-variants/. This is the largest
   piece of follow-up work and benefits the whole family.
 - **Touch.** The Z2's MAX1187x has no mainline driver and Sony's binding is
-  nothing like a mainline one (see the node in ../devicetree/latest.dts: dozens
+  nothing like a mainline one (see `touchscreen@48` in
+  ../devicetree/qcom-msm8974pro-sony-xperia-sirius.dts: dozens
   of vendor properties, a nested wakeup-gesture tree). Submitting the DTS with
   an undocumented compatible would be rejected, so the inherited Synaptics node
   is simply disabled.
 - **Audio.** Needs the msm8974 ASoC machine driver
-  (../panel/driver/msm8974-sndcard.c) and the q6afe change.
+  (../drivers/audio/msm8974-sndcard.c) and the q6afe change.
 - **GPU.** Works here only with a VRAM carveout on the kernel command line,
   because msm8974 has no GPU IOMMU support. Not a device tree matter alone.
 - **Battery percentage.** Depends on two out-of-tree patches (0005, 0006 in
-  ../panel/driver/), which are themselves upstream candidates.
+  ../drivers/battery/), which are themselves upstream candidates.
 
 ### How it was validated
 
@@ -107,7 +108,7 @@ Smallest and most independent first:
    no new bindings, stands alone.
 2. **This DTS** to linux-arm-msm, plus the Makefile line. Needs no new
    bindings: every compatible it uses is already documented.
-3. **Panel driver and binding** to dri-devel. See ../panel/variants/.
+3. **Panel driver and binding** to dri-devel. See ../panel-variants/ and ../drivers/panel/.
 4. **Display, audio and sensor nodes for the rest of the family** into
    shinano-common.dtsi, once the drivers they need are in.
 

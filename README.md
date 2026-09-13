@@ -65,8 +65,9 @@ registers read fine.
     upstream/           a mainline-style device tree, for submission
     userspace/          the ALSA UCM profile, and fixes for 32-bit ARM
                         that are not Z2 specific
-    tools/              build a boot image, compile a device tree on the phone,
-                        drive the Broadcom FM tuner
+    tools/              build the board device tree and a boot image, check that
+                        two device trees describe the same hardware, drive the
+                        Broadcom FM tuner
     docs/               identification, extraction, prior art, and what each
                         unfinished part costs
 
