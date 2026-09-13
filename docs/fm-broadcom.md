@@ -78,6 +78,21 @@ From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
    recipe: set `FM_AUDIO_I2S_ON` (bit 5) in AUD_CTL0, clear the manual mute
    (bit 1), and write PCM_ROUTE back unchanged; no extra vendor command is
    needed when FM I2S is not being redirected over the Bluetooth PCM pins.
+   **Status:** the port is written —
+   `../drivers/audio/0014-ASoC-qdsp6-add-the-internal-FM-capture-port.patch`
+   — built with clang to match the kernel's `CONFIG_CFI_CLANG`, checked for
+   symbol CRC agreement, and installed on the phone under
+   `/lib/modules/6.16.12/updates/qdsp6-fm/`. The device tree needs one extra
+   backend link, "Internal FM Capture" on `INT_FM_TX`; the boot image
+   `images/boot-sirius-fm.img` is the running tree plus exactly that node.
+   `../tools/fm-play.sh 98.9` sets the Broadcom I2S output, routes the port
+   and plays the stream to the speaker. Not yet run end to end.
+
+   Two dead ends on the way, worth knowing: the phone's kernel is the
+   msm8974-mainline fork, so a device tree compiled from vanilla sources
+   differs from the running one in thousands of properties; and the kernel is
+   built with clang and kCFI, so GCC-built modules must not be loaded.
+
 3. **A kernel driver.** Mainline has no Broadcom FM driver. Userspace control
    is enough to prove and use the tuner; a V4L2 driver over `btbcm` vendor
    commands, modelled on Sony's, is the eventual form.
