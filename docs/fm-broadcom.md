@@ -85,8 +85,10 @@ From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
    `/lib/modules/6.16.12/updates/qdsp6-fm/`. The device tree needs one extra
    backend link, "Internal FM Capture" on `INT_FM_TX`; the boot image
    `images/boot-sirius-fm.img` is the running tree plus exactly that node.
-   `../tools/fm-play.sh 98.9` sets the Broadcom I2S output, routes the port
-   and plays the stream to the speaker. Not yet run end to end.
+   `../tools/fm-play.sh 98.9` sets the Broadcom I2S output, routes the port,
+   captures from `hw:0,0` and plays the stream to the sound server's speaker
+   sink. Capture bypasses the sound server because the UCM HiFi profile
+   declares only a Speaker playback device. Not yet run end to end.
 
    Two dead ends on the way, worth knowing: the phone's kernel is the
    msm8974-mainline fork, so a device tree compiled from vanilla sources
