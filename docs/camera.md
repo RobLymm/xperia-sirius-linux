@@ -1,5 +1,7 @@
 # Camera: the ISP is nearly solved, the sensors are not
 
+The staged bring-up plan is in `camera-plan.md`.
+
 Not working, not attempted on this device. But the hard-looking part turns out
 to have been done by other people on other msm8974 phones, and the remaining
 work is narrower and better defined than it first appears.
