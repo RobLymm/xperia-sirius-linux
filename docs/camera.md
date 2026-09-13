@@ -33,10 +33,8 @@ most likely an IMX200 and the front an IMX132, with the front module sourced
 from two vendors. The sensor ID registers will confirm once the CCI bus works.
 No mainline or out-of-tree driver was found for IMX200, IMX132 or IMX135; the
 nearest prior art is the IMX300 driver written by reverse-engineering Sony
-Xperia userspace sensor drivers. Sony names them
-`sony_camera_0` and `sony_camera_1` rather than giving part numbers, so
-identifying the actual sensors is a prerequisite. There is an EEPROM at 0xa0
-that should answer it on hardware.
+Xperia userspace sensor drivers. Sony's device tree itself only says
+`sony_camera_0` and `sony_camera_1`; each module also has an EEPROM at 0xa0.
 
 ## What already exists
 
@@ -118,8 +116,8 @@ marked HACK.
 
 So the order is:
 
-1. Identify the two parts. Sony's abstraction hides them; the EEPROM at 0xa0
-   and the sensor ID registers will say, once the CCI bus is up.
+1. Confirm the two parts — IMX200 rear and IMX132 front on current evidence —
+   from the sensor ID registers once the CCI bus is up.
 2. Get CCI working, which needs the msm8974 CCI hack forward-ported.
 3. Bring up camss against `qcom,msm8916-camss` with the patch above
    forward-ported from 5.17 to current.
