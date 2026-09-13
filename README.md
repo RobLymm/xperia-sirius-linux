@@ -32,7 +32,7 @@ apply to all four devices, not only the Z2.
 | Suspend and resume | Not working. Resume loses Wi-Fi and touch | `docs/known-problems.md` |
 | NFC | Not tested. NXP PN547; mainline driver exists, node written | `docs/nfc.md` |
 | Camera | Not attempted. ISP support exists for msm8974 elsewhere; the sensors need drivers | `docs/camera.md` |
-| FM radio | Driver written and compiles; needs a kernel with media support to load | `drivers/fm/` |
+| FM radio | Broadcom tuner in the Bluetooth chip powers on and tunes from userspace; reception and audio not yet tested | `docs/fm-broadcom.md` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
@@ -45,14 +45,16 @@ registers read fine.
     drivers/panel/      DRM panel driver, all six Z2 panel variants
     drivers/audio/      ASoC machine driver for the msm8974 sound card
     drivers/battery/    VADC scaling and OCV capacity estimation patches
-    drivers/fm/         V4L2 radio driver for the WCNSS tuner, untested
+    drivers/fm/         V4L2 driver for WCNSS FM tuners (other msm8974 phones,
+                        not the Z2)
     panel-variants/     the six panel configurations extracted from stock,
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs
     upstream/           a mainline-style device tree, for submission
     userspace/          the ALSA UCM profile, and fixes for 32-bit ARM
                         that are not Z2 specific
-    tools/              build a boot image, compile a device tree on the phone
+    tools/              build a boot image, compile a device tree on the phone,
+                        drive the Broadcom FM tuner
     docs/               identification, extraction, prior art, and what each
                         unfinished part costs
 

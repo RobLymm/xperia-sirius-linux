@@ -1,5 +1,11 @@
 # FM radio driver for the WCNSS tuner
 
+> **This driver does not apply to the Xperia Z2.** The Z2's FM tuner is in the
+> Broadcom BCM4335C0 Bluetooth chip, not in a Qualcomm WCNSS; the Z2 has no
+> WCNSS at all. See `../../docs/fm-broadcom.md`, which has the protocol and a
+> working userspace tuning tool. This driver targets WCN3680 phones such as
+> the Fairphone 2 and is kept for them.
+
 `radio-wcnss-fm.c` is a V4L2 radio driver for the FM receiver inside the
 WCN3680, written for this project.
 
@@ -13,7 +19,7 @@ that proves is that the driver is valid C against the real kernel API — every
 signature, every struct member, every header. It proves nothing about whether
 the hardware answers.
 
-It is here because FM was the one subsystem on this phone with no existing
+It was written because FM on WCNSS had no existing
 implementation anywhere: not in mainline, not in the msm8974-mainline fork,
 and listed as "No driver" in the Fairphone 2 support table by someone who has
 worked on this SoC for years.

@@ -85,18 +85,16 @@ What remains for this phone is the sensors: Sony hides the parts behind
 Sony flagship sensor. Full detail, the hardware table and the device tree node
 in `camera.md`.
 
-## FM radio — written, compiles, cannot load yet
+## FM radio — the tuner answers from userspace
 
-Nothing existed for this tuner anywhere, so `../drivers/fm/radio-wcnss-fm.c`
-was written: a sibling of `btqcomsmd` on the WCNSS `APPS_FM` channel, protocol
-from downstream `radio-iris`. It compiles against 6.16.12 with no warnings at
-`W=1`.
+The Z2's tuner is in the Broadcom BCM4335C0 Bluetooth chip and is driven over
+HCI vendor command `0xFC15`. From userspace it powers on and tunes, verified on
+the phone; reception is untested because it needs headphones as the aerial.
+Audio routing is the open question. Detail in `fm-broadcom.md`; tool in
+`../tools/bcm-fm.sh`.
 
-It cannot load on the current kernel, which is built without
-`CONFIG_MEDIA_SUPPORT`; everything else it needs is present. A kernel rebuild
-with the five config lines in `../drivers/fm/README.md` is the next step,
-followed by the checks listed there. The headphone lead is the aerial, and
-audio needs the ADSP FM routing wired into the sound card separately.
+An earlier version of this section described a WCNSS driver. The Z2 has no
+WCNSS; that driver is for other msm8974 phones.
 
 ## Order worth doing them in
 
@@ -106,5 +104,5 @@ audio needs the ADSP FM routing wired into the sound card separately.
 4. **Headphones** — forward-port an existing 7,000-line driver.
 5. **Camera** — forward-port existing msm8974 camss and CCI work, then
    identify and drive the two sensors.
-6. **FM** — rebuild the kernel with media support, load, and work down
-   the list in `../drivers/fm/README.md`.
+6. **FM** — plug in headphones and sweep for stations with
+   `../tools/bcm-fm.sh`, then find the audio route.
