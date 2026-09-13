@@ -18,21 +18,33 @@ apply to all four devices, not only the Z2.
 
 ## State of each subsystem
 
-| Subsystem | State | Where |
+The first eighteen rows are the columns of the postmarketOS device table, in
+the same order, so this phone can be compared directly with the Xperia Z3 and
+the others listed there.
+
+| Feature | State | Detail |
 |---|---|---|
-| Display | Working. Six panel variants, selected at runtime; generated drivers for all six | `drivers/panel/`, `panel-variants/` |
-| Touch | Working. Maxim MAX1187x, out-of-tree driver, Sony's binding | `devicetree/` |
-| Wi-Fi, Bluetooth | Working | in-tree drivers, device tree only |
-| GPU | Working for the compositor. Adreno 330 via freedreno, needs a VRAM carveout | `docs/known-problems.md` |
-| Audio, speakers | Working. QDSP6 to Quaternary MI2S to two TFA9890 amplifiers | `drivers/audio/` |
-| Audio, headphones and microphones | Not working. Needs a WCD9320 codec driver and SLIMbus on msm8974 | `drivers/audio/README.md` |
-| Battery percentage | Working, via VADC VBAT_SNS and an OCV table | `drivers/battery/` |
-| Sensors | Working. Accelerometer, gyroscope, magnetometer, barometer, light and proximity | `upstream/` |
-| Modem | Boots, then stalls during initialisation; firmware and memory ruled out | `docs/modem.md` |
-| Suspend and resume | Not working. Resume loses Wi-Fi and touch | `docs/known-problems.md` |
-| NFC | Not tested. NXP PN547; mainline driver exists, node written | `docs/nfc.md` |
-| Camera | Not attempted. ISP support exists for msm8974 elsewhere; the sensors need drivers | `docs/camera.md` |
-| FM radio | Broadcom tuner in the Bluetooth chip powers on and tunes from userspace; reception and audio not yet tested | `docs/fm-broadcom.md` |
+| USB networking | Working | SSH over USB at 172.16.42.1 |
+| Flashing | Working with `fastboot flash boot` | Sony's S1 bootloader boots the boot partition directly. Build the image with `tools/`; see `devicetree/README.md` |
+| Touch | Working | Maxim MAX1187x, out-of-tree driver, Sony's binding. Reports multitouch in evdev protocol A; see `docs/known-problems.md` |
+| Screen | Working | Six panel variants, selected at runtime, with a generated driver for each. `drivers/panel/`, `panel-variants/` |
+| Wi-Fi | Working | Broadcom brcmfmac over SDIO, in-tree driver |
+| FDE | Not tested | The test install is unencrypted |
+| Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
+| 3D | Partly working | Adreno 330 through freedreno runs the compositor. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer. Needs a VRAM carveout. `docs/known-problems.md` |
+| IMU | Working | Accelerometer, gyroscope, magnetometer and barometer. The light sensor binds but reads 0 lux; proximity responds but is uncalibrated |
+| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. Headphones, earpiece and microphones need the WCD9320 codec, for which a 4.18-era out-of-tree driver exists to port. `drivers/audio/`, `docs/remaining-hardware.md` |
+| Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
+| Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
+| GPS | Not working | Depends on the modem |
+| Mobile data | Not working | The modem loads its firmware and then stalls during initialisation. `docs/modem.md` |
+| SMS | Not working | Depends on the modem |
+| Calls | Not working | Depends on the modem |
+| USB-OTG | Not tested | The USB controller is in OTG mode and the PM8941 ID detection is present; host mode has not been tried |
+| NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
+| CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |
+| Suspend and resume | Not working | Resume loses Wi-Fi and touch, so suspend is turned off. `docs/known-problems.md` |
+| FM radio | Partly working | The tuner is inside the Broadcom Bluetooth chip; it powers on and tunes from userspace. Reception and audio routing are not yet tested. `docs/fm-broadcom.md` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
