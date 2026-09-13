@@ -1,9 +1,23 @@
 # The device tree that runs
 
-`qcom-msm8974pro-sony-xperia-sirius.dts` is what the phone boots: 455 lines of
+`qcom-msm8974pro-sony-xperia-sirius.dts` is what the phone boots: 529 lines of
 labelled source, built on mainline's `qcom-msm8974pro-sony-xperia-shinano-common.dtsi`
 with the Z2's own peripherals described on top. Display, audio, Bluetooth,
 touch, sensors, battery and GPU all work on it.
+
+The file follows the kernel's device tree coding style: `&label` overrides in
+alphabetical order, bus children in unit-address order, lowercase hex, and
+`dt-bindings` macros (`IRQ_TYPE_EDGE_FALLING`, `GPIO_ACTIVE_LOW`,
+`QUATERNARY_MI2S_RX`, `VADC_VBAT_SNS`) in place of the raw numbers the
+decompiler produced. The style pass changed no hardware description. The
+compiled result was compared with the tree that booted: the same 509 nodes,
+the same property names and the same values, with phandle cells matched by the
+node they point to. The comparison was tested by changing one interrupt number
+and one phandle target, and it reported both. The tidied file was then booted on
+the phone (2026-09-13). The tree the kernel received matched the build, apart
+from the `chosen` properties and the memory size that the bootloader writes,
+and display, speakers, Bluetooth, touch, sensors, battery, GPU and Wi-Fi all
+came up.
 
 It replaced a 3,423 line decompiled tree that used raw phandle numbers
 (`<0x9a>`, `<0xcd>`) instead of labels. Beyond being unreadable, the flattened

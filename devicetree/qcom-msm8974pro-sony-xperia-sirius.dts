@@ -16,10 +16,54 @@
 
 #include "qcom-msm8974pro-sony-xperia-shinano-common.dtsi"
 
+#include <dt-bindings/soc/qcom,apr.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
+
 / {
 	model = "Sony Xperia Z2";
 	compatible = "sony,xperia-sirius", "qcom,msm8974pro", "qcom,msm8974";
 	chassis-type = "handset";
+
+	sirius_battery: battery {
+		compatible = "simple-battery";
+
+		voltage-min-design-microvolt = <3200000>;
+		voltage-max-design-microvolt = <4350000>;
+		charge-full-design-microamp-hours = <3200000>;
+
+		ocv-capacity-celsius = <25>;
+		ocv-capacity-table-0 = <4350000 100>,
+				       <4290000 95>,
+				       <4240000 90>,
+				       <4190000 85>,
+				       <4140000 80>,
+				       <4090000 75>,
+				       <4040000 70>,
+				       <3990000 65>,
+				       <3950000 60>,
+				       <3910000 55>,
+				       <3870000 50>,
+				       <3840000 45>,
+				       <3820000 40>,
+				       <3800000 35>,
+				       <3780000 30>,
+				       <3760000 25>,
+				       <3740000 20>,
+				       <3710000 15>,
+				       <3680000 10>,
+				       <3620000 5>,
+				       <3400000 0>;
+	};
+
+	fuel-gauge {
+		compatible = "adc-battery";
+
+		io-channels = <&pm8941_vadc VADC_VBAT_SNS>;
+		io-channel-names = "voltage";
+
+		monitored-battery = <&sirius_battery>;
+	};
 
 	/* The Z2 has a two-stage camera button, as the Z3 does. */
 	gpio-keys {
@@ -37,84 +81,85 @@
 			debounce-interval = <15>;
 		};
 	};
-
-	sirius_battery: battery {
-		compatible = "simple-battery";
-		voltage-min-design-microvolt = <0x30d400>;
-		voltage-max-design-microvolt = <0x426030>;
-		charge-full-design-microamp-hours = <0x30d400>;
-		ocv-capacity-celsius = <0x19>;
-		ocv-capacity-table-0 = <0x426030 0x64>, <0x4175d0 0x5f>, <0x40b280 0x5a>, <0x3fef30 0x55>, <0x3f2be0 0x50>, <0x3e6890 0x4b>, <0x3da540 0x46>, <0x3ce1f0 0x41>, <0x3c45b0 0x3c>, <0x3ba970 0x37>, <0x3b0d30 0x32>, <0x3a9800 0x2d>, <0x3a49e0 0x28>, <0x39fbc0 0x23>, <0x39ada0 0x1e>, <0x395f80 0x19>, <0x391160 0x14>, <0x389c30 0xf>, <0x382700 0xa>, <0x373ca0 0x5>, <0x33e140 0x0>;
-	};
-
-	fuel-gauge {
-		compatible = "adc-battery";
-		io-channels = <&pm8941_vadc 0x06>;
-		io-channel-names = "voltage";
-		monitored-battery = <&sirius_battery>;
-	};
 };
 
 /*
  * Touch. The Z3 carries a Synaptics RMI4 part at 0x2c on this bus; the Z2 has
  * a Maxim MAX1187x at 0x48, on the same interrupt and supply.
+ *
+ * The properties below are the binding of the out-of-tree max1187x driver,
+ * which reads them by these names. They do not follow mainline naming and
+ * cannot be renamed without changing the driver.
  */
 &blsp2_i2c2 {
 	/delete-node/ synaptics@2c;
 
-	maxim_max1187x_tsc@48 {
+	touchscreen@48 {
 		compatible = "maxim,max1187x_tsc";
 		reg = <0x48>;
+
 		interrupt-parent = <&tlmm>;
-		interrupts = <86 0x2>;
+		interrupts = <86 IRQ_TYPE_EDGE_FALLING>;
+
 		vdd-supply = <&pm8941_l22>;
 		touch_vdd-supply_name = "vdd";
+
 		tirq-gpio = <&tlmm 86 0x2>;
 		reset-gpio = <&tlmm 85 0x2>;
 		reset_l2h = <1>;
 		enable_resume_por = <1>;
+
 		defaults_allow = <0>;
 		default_config_id = <0>;
 		default_chip_id = <0>;
 		fw_name = "touch_chip_id_0x%02x_config_id_0x%%04x.bin";
 		i2c_words = <128>;
 		coordinate_settings = <0x4>;
-		panel_margin_xl = <0>;
+
 		lcd_x = <1080>;
-		panel_margin_xh = <0>;
-		panel_margin_yl = <0>;
 		lcd_y = <1920>;
-		panel_margin_yh = <0>;
 		num_sensor_x = <20>;
 		num_sensor_y = <34>;
+		panel_margin_xl = <0>;
+		panel_margin_xh = <0>;
+		panel_margin_yl = <0>;
+		panel_margin_yh = <0>;
+
 		button_code0 = <0>;
 		button_code1 = <0>;
 		button_code2 = <0>;
 		button_code3 = <0>;
+
 		touch_pressure_enabled = <1>;
 		touch_size_enabled = <0>;
 		touch_orientation_enabled = <0>;
 		glove_enabled = <0>;
 		report_pen_as_finger = <1>;
+
 		wakeup_gesture_support = <1>;
 		wakeup_gesture_timeout = <2000>;
+
 		wakeup_gesture {
 			double_tap {
 				gesture_code = <0x0102>;
+
 				event_00 {
 					type = <2>; /* LOG */
 					message = "=== DOUBLE TAP ===";
 				};
+
 				event_01 {
 					type = <1>; /* KEY */
-					code = <116>; /* KEY_POWER */
+					code = <KEY_POWER>;
 					down = <1>;
 				};
+
 				event_02 {
 					type = <1>; /* KEY */
-					code = <116>; /* KEY_POWER */
+					code = <KEY_POWER>;
 					down = <0>;
 				};
+
 				event_03 {
 					type = <99>; /* END */
 				};
@@ -130,14 +175,14 @@
 	speaker_left: amplifier@34 {
 		compatible = "nxp,tfa9890";
 		reg = <0x34>;
-		#sound-dai-cells = <0x00>;
+		#sound-dai-cells = <0>;
 		sound-name-prefix = "Speaker Top";
 	};
 
 	speaker_right: amplifier@35 {
 		compatible = "nxp,tfa9890";
 		reg = <0x35>;
-		#sound-dai-cells = <0x00>;
+		#sound-dai-cells = <0>;
 		sound-name-prefix = "Speaker Bottom";
 	};
 };
@@ -146,25 +191,28 @@
 &blsp2_i2c6 {
 	status = "okay";
 
+	magnetometer@c {
+		compatible = "asahi-kasei,ak09911";
+		reg = <0x0c>;
+
+		vdd-supply = <&pm8941_l17>;
+		vid-supply = <&pm8941_lvs1>;
+
+		mount-matrix = "0", "0", "1",
+			       "0", "-1", "0",
+			       "1", "0", "0";
+	};
+
 	accelerometer@18 {
 		compatible = "bosch,bma255";
 		reg = <0x18>;
-		interrupt-parent = <&tlmm>;
-		interrupts = <0x49 0x01>;
-		vdd-supply = <&pm8941_l17>;
-		vddio-supply = <&pm8941_lvs1>;
-		mount-matrix = "0", "-1", "0",
-			       "1", "0", "0",
-			       "0", "0", "1";
-	};
 
-	gyroscope@68 {
-		compatible = "bosch,bmg160";
-		reg = <0x68>;
 		interrupt-parent = <&tlmm>;
-		interrupts = <0x42 0x01>;
+		interrupts = <73 IRQ_TYPE_EDGE_RISING>;
+
 		vdd-supply = <&pm8941_l17>;
 		vddio-supply = <&pm8941_lvs1>;
+
 		mount-matrix = "0", "-1", "0",
 			       "1", "0", "0",
 			       "0", "0", "1";
@@ -173,25 +221,33 @@
 	light-sensor@39 {
 		compatible = "avago,apds9930";
 		reg = <0x39>;
+
 		interrupt-parent = <&tlmm>;
-		interrupts = <0x4a 0x02>;
+		interrupts = <74 IRQ_TYPE_EDGE_FALLING>;
+
 		vdd-supply = <&pm8941_l17>;
 		vddio-supply = <&pm8941_lvs1>;
 	};
 
-	magnetometer@c {
-		compatible = "asahi-kasei,ak09911";
-		reg = <0x0c>;
+	gyroscope@68 {
+		compatible = "bosch,bmg160";
+		reg = <0x68>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <66 IRQ_TYPE_EDGE_RISING>;
+
 		vdd-supply = <&pm8941_l17>;
-		vid-supply = <&pm8941_lvs1>;
-		mount-matrix = "0", "0", "1",
-			       "0", "-1", "0",
-			       "1", "0", "0";
+		vddio-supply = <&pm8941_lvs1>;
+
+		mount-matrix = "0", "-1", "0",
+			       "1", "0", "0",
+			       "0", "0", "1";
 	};
 
 	pressure@76 {
 		compatible = "bosch,bmp280";
 		reg = <0x76>;
+
 		vddd-supply = <&pm8941_l17>;
 		vdda-supply = <&pm8941_lvs1>;
 	};
@@ -202,14 +258,24 @@
 	status = "okay";
 
 	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		max-speed = <3000000>;
+
 		pinctrl-0 = <&bt_host_wake_pin>, <&bt_dev_wake_pin>, <&bt_reg_on_pin>;
 		pinctrl-names = "default";
-		compatible = "brcm,bcm43438-bt";
-		max-speed = <0x2dc6c0>;
-		host-wakeup-gpios = <&tlmm 0x5f 0x00>;
-		device-wakeup-gpios = <&tlmm 0x60 0x00>;
-		shutdown-gpios = <&pm8941_gpios 0x10 0x00>;
+
+		host-wakeup-gpios = <&tlmm 95 GPIO_ACTIVE_HIGH>;
+		device-wakeup-gpios = <&tlmm 96 GPIO_ACTIVE_HIGH>;
+		shutdown-gpios = <&pm8941_gpios 16 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+&gpio_keys_pin_a {
+	pins = "gpio2", "gpio3", "gpio4", "gpio5";
+};
+
+&gpu {
+	status = "okay";
 };
 
 &mdss {
@@ -217,24 +283,26 @@
 };
 
 &mdss_dsi0 {
-	status = "okay";
-
 	vdda-supply = <&pm8941_l2>;
 	vdd-supply = <&pm8941_lvs3>;
 	vddio-supply = <&pm8941_l12>;
 
+	status = "okay";
+
 	panel: panel@0 {
 		compatible = "sony,sirius-panel";
-		reg = <0x00>;
+		reg = <0>;
+
+		backlight = <&pm8941_wled>;
+		reset-gpios = <&pm8941_gpios 19 GPIO_ACTIVE_LOW>;
+
 		vddio-supply = <&pm8941_lvs3>;
 		vsp-supply = <&vreg_vsp>;
-		reset-gpios = <&pm8941_gpios 0x13 0x01>;
-		backlight = <&pm8941_wled>;
+
 		pinctrl-0 = <&lcd_reset_pin>;
 		pinctrl-names = "default";
 
 		port {
-
 			panel_in: endpoint {
 				remote-endpoint = <&mdss_dsi0_out>;
 			};
@@ -248,24 +316,9 @@
 };
 
 &mdss_dsi0_phy {
-	status = "okay";
 	vddio-supply = <&pm8941_l12>;
-};
 
-&gpu {
 	status = "okay";
-};
-
-/* Backlight: PM8941 WLED driving two strings. */
-&pm8941_wled {
-	status = "okay";
-
-	qcom,cs-out;
-	qcom,current-limit = <20>;
-	qcom,current-boost-limit = <805>;
-	qcom,switching-freq = <1600>;
-	qcom,ovp = <29>;
-	qcom,num-strings = <2>;
 };
 
 &pm8941_gpios {
@@ -273,153 +326,20 @@
 		pins = "gpio16";
 		function = "normal";
 		output-low;
-		power-source = <0x02>;
+		power-source = <PM8941_GPIO_S3>;
 	};
 
 	lcd_reset_pin: lcd-reset-state {
 		pins = "gpio19";
 		function = "normal";
 		bias-disable;
-		power-source = <0x02>;
 		input-disable;
 		output-high;
+		power-source = <PM8941_GPIO_S3>;
 	};
 };
 
-&tlmm {
-	bt_dev_wake_pin: bt-dev-wake-state {
-		pins = "gpio96";
-		function = "gpio";
-		drive-strength = <0x02>;
-		bias-disable;
-	};
-
-	bt_host_wake_pin: bt-host-wake-state {
-		pins = "gpio95";
-		function = "gpio";
-		drive-strength = <0x02>;
-		bias-disable;
-		output-low;
-	};
-
-	quat_mi2s_default: quat-mi2s-default-state {
-		pins = "gpio58", "gpio59", "gpio60", "gpio61";
-		function = "qua_mi2s";
-		drive-strength = <0x08>;
-		bias-disable;
-	};
-};
-
-/* Audio: QDSP6 on the ADSP, Quaternary MI2S out to the amplifiers. */
-&remoteproc_adsp {
-	status = "okay";
-
-	smd-edge {
-		apr {
-			compatible = "qcom,apr-v2";
-			qcom,smd-channels = "apr_audio_svc";
-			qcom,domain = <0x04>;
-			#address-cells = <0x01>;
-			#size-cells = <0x00>;
-
-			service@3 {
-				compatible = "qcom,q6core";
-				reg = <0x03>;
-			};
-
-			service@4 {
-				compatible = "qcom,q6afe";
-				reg = <0x04>;
-
-				q6afedai: dais {
-					compatible = "qcom,q6afe-dais";
-					#address-cells = <0x01>;
-					#size-cells = <0x00>;
-					#sound-dai-cells = <0x01>;
-
-					dai@22 {
-						reg = <0x16>;
-						qcom,sd-lines = <0x00>;
-					};
-				};
-			};
-
-			service@7 {
-				compatible = "qcom,q6asm";
-				reg = <0x07>;
-
-				q6asmdai: dais {
-					compatible = "qcom,q6asm-dais";
-					#address-cells = <0x01>;
-					#size-cells = <0x00>;
-					#sound-dai-cells = <0x01>;
-
-					dai@0 {
-						reg = <0x00>;
-					};
-				};
-			};
-
-			service@8 {
-				compatible = "qcom,q6adm";
-				reg = <0x08>;
-
-				q6routing: routing {
-					compatible = "qcom,q6adm-routing";
-					#sound-dai-cells = <0x00>;
-				};
-			};
-		};
-	};
-};
-
-&soc {
-	sound@fe02f000 {
-		compatible = "qcom,msm8974-sndcard";
-		reg = <0xfe02f000 0x04>;
-		reg-names = "lpaif_quat_mode_muxsel";
-		model = "Sony Xperia Z2";
-		pinctrl-names = "default";
-		pinctrl-0 = <&quat_mi2s_default>;
-
-		mm1-dai-link {
-			link-name = "MultiMedia1";
-
-			cpu {
-				sound-dai = <&q6asmdai 0x00>;
-			};
-		};
-
-		quat-mi2s-dai-link {
-			link-name = "Quaternary MI2S Playback";
-
-			cpu {
-				sound-dai = <&q6afedai 0x16>;
-			};
-
-			platform {
-				sound-dai = <&q6routing>;
-			};
-
-			codec {
-				sound-dai = <&speaker_left>, <&speaker_right>;
-			};
-		};
-	};
-};
-
-/*
- * Rails the Z2 needs held on that the Shinano common tree does not mark.
- * lvs1 is not declared there at all; the sensors on blsp2_i2c6 run from it.
- */
-&rpm_requests {
-	regulators-1 {
-		pm8941_lvs1: lvs1 {
-			regulator-always-on;
-		};
-	};
-};
-
+/* Rails the Z2 needs held on that the Shinano common tree does not mark. */
 &pm8941_l16 {
 	regulator-always-on;
 };
@@ -430,6 +350,93 @@
 
 &pm8941_l18 {
 	regulator-always-on;
+};
+
+/* Backlight: PM8941 WLED driving two strings. */
+&pm8941_wled {
+	qcom,cs-out;
+	qcom,current-boost-limit = <805>;
+	qcom,current-limit = <20>;
+	qcom,num-strings = <2>;
+	qcom,ovp = <29>;
+	qcom,switching-freq = <1600>;
+
+	status = "okay";
+};
+
+/* Audio: QDSP6 on the ADSP, Quaternary MI2S out to the amplifiers. */
+&remoteproc_adsp {
+	status = "okay";
+
+	smd-edge {
+		apr {
+			compatible = "qcom,apr-v2";
+			qcom,smd-channels = "apr_audio_svc";
+			qcom,domain = <APR_DOMAIN_ADSP>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			service@3 {
+				compatible = "qcom,q6core";
+				reg = <APR_SVC_ADSP_CORE>;
+			};
+
+			service@4 {
+				compatible = "qcom,q6afe";
+				reg = <APR_SVC_AFE>;
+
+				q6afedai: dais {
+					compatible = "qcom,q6afe-dais";
+					#address-cells = <1>;
+					#size-cells = <0>;
+					#sound-dai-cells = <1>;
+
+					dai@22 {
+						reg = <QUATERNARY_MI2S_RX>;
+						qcom,sd-lines = <0>;
+					};
+				};
+			};
+
+			service@7 {
+				compatible = "qcom,q6asm";
+				reg = <APR_SVC_ASM>;
+
+				q6asmdai: dais {
+					compatible = "qcom,q6asm-dais";
+					#address-cells = <1>;
+					#size-cells = <0>;
+					#sound-dai-cells = <1>;
+
+					dai@0 {
+						reg = <MSM_FRONTEND_DAI_MULTIMEDIA1>;
+					};
+				};
+			};
+
+			service@8 {
+				compatible = "qcom,q6adm";
+				reg = <APR_SVC_ADM>;
+
+				q6routing: routing {
+					compatible = "qcom,q6adm-routing";
+					#sound-dai-cells = <0>;
+				};
+			};
+		};
+	};
+};
+
+/*
+ * lvs1 is not declared in the Shinano common tree at all; the sensors on
+ * blsp2_i2c6 take their I/O supply from it.
+ */
+&rpm_requests {
+	regulators-1 {
+		pm8941_lvs1: lvs1 {
+			regulator-always-on;
+		};
+	};
 };
 
 /*
@@ -449,16 +456,74 @@
  * a 3200 mAh cell.
  */
 &smbb {
-	status = "okay";
-
 	usb-charge-current-limit = <1500000>;
-	qcom,fast-charge-safe-current = <1600000>;
-	qcom,fast-charge-current-limit = <1600000>;
-	qcom,fast-charge-safe-voltage = <4400000>;
-	qcom,fast-charge-high-threshold-voltage = <4350000>;
 	qcom,auto-recharge-threshold-voltage = <4280000>;
+	qcom,fast-charge-current-limit = <1600000>;
+	qcom,fast-charge-high-threshold-voltage = <4350000>;
+	qcom,fast-charge-safe-current = <1600000>;
+	qcom,fast-charge-safe-voltage = <4400000>;
 	qcom,minimum-input-voltage = <4200000>;
+
+	status = "okay";
 };
-&gpio_keys_pin_a {
-	pins = "gpio2", "gpio3", "gpio4", "gpio5";
+
+&soc {
+	sound@fe02f000 {
+		compatible = "qcom,msm8974-sndcard";
+		reg = <0xfe02f000 0x4>;
+		reg-names = "lpaif_quat_mode_muxsel";
+
+		model = "Sony Xperia Z2";
+
+		pinctrl-0 = <&quat_mi2s_default>;
+		pinctrl-names = "default";
+
+		mm1-dai-link {
+			link-name = "MultiMedia1";
+
+			cpu {
+				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+			};
+		};
+
+		quat-mi2s-dai-link {
+			link-name = "Quaternary MI2S Playback";
+
+			cpu {
+				sound-dai = <&q6afedai QUATERNARY_MI2S_RX>;
+			};
+
+			platform {
+				sound-dai = <&q6routing>;
+			};
+
+			codec {
+				sound-dai = <&speaker_left>, <&speaker_right>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	bt_dev_wake_pin: bt-dev-wake-state {
+		pins = "gpio96";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	bt_host_wake_pin: bt-host-wake-state {
+		pins = "gpio95";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+		output-low;
+	};
+
+	quat_mi2s_default: quat-mi2s-default-state {
+		pins = "gpio58", "gpio59", "gpio60", "gpio61";
+		function = "qua_mi2s";
+		drive-strength = <8>;
+		bias-disable;
+	};
 };
