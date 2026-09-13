@@ -21,14 +21,11 @@ which is a one-line change to try both ways.
 
 ### Modem: boots, then stalls
 
-Detail in `modem.md`. The check not yet done: the reserved regions came from
-the Xperia Z3 while the firmware is the Z2's own, and `mpss` is 81 MB. If the
-Z2's modem image exceeds that, a stall is the expected symptom.
-
-    ls -l /lib/firmware/postmarketos/modem.* | awk '{s+=$5} END {print s/1024/1024 " MB"}'
-
-Diffing Sony's tree does not help: downstream allocates modem memory at
-runtime rather than declaring fixed regions.
+Firmware is finished and packaged, and five hypotheses have been ruled out:
+region size, missing segments, load addresses, rmtfs and the userspace stack.
+The modem brings up its SMD transport and stops before registering services.
+Next candidates are lk2nd and the Z2's own ADSP firmware. Detail in
+`modem.md`.
 
 ### Suspend and resume: comes back without Wi-Fi or touch
 
@@ -88,36 +85,26 @@ What remains for this phone is the sensors: Sony hides the parts behind
 Sony flagship sensor. Full detail, the hardware table and the device tree node
 in `camera.md`.
 
-## FM radio — written from scratch, never run
+## FM radio — written, compiles, cannot load yet
 
-Nothing existed for this tuner anywhere: not mainline, not the msm8974 fork,
-and listed as "No driver" in the Fairphone 2 table. So it was written.
+Nothing existed for this tuner anywhere, so `../drivers/fm/radio-wcnss-fm.c`
+was written: a sibling of `btqcomsmd` on the WCNSS `APPS_FM` channel, protocol
+from downstream `radio-iris`. It compiles against 6.16.12 with no warnings at
+`W=1`.
 
-`../drivers/fm/radio-wcnss-fm.c`, about 590 lines. The tuner is inside the
-WCN3680 and is reached over a single SMD channel, `APPS_FM`, on the WCNSS
-edge — the same mechanism `btqcomsmd` uses for Bluetooth, so the driver
-attaches as a platform device below the WCNSS control node and takes its
-channel from `qcom_wcnss_open_channel()`. The protocol came from the
-downstream `radio-iris` driver.
-
-It implements enable, tune, station parameters, mute, mono/stereo and
-hardware seek. It has never been compiled against a kernel tree or loaded,
-because the phone was unreachable while it was written. `../drivers/fm/README.md`
-lists what to check first, in order of how likely each is to be wrong.
-
-One thing worth knowing before testing: the headphone lead is the aerial, so
-nothing will tune without headphones plugged in. And the driver controls only
-the tuner — audio needs the ADSP routing Sony exposes as
-`qcom,msm-dai-q6-int-fm-rx` wired into the sound card, so expect a working
-`/dev/radio0` and silence until that is done.
+It cannot load on the current kernel, which is built without
+`CONFIG_MEDIA_SUPPORT`; everything else it needs is present. A kernel rebuild
+with the five config lines in `../drivers/fm/README.md` is the next step,
+followed by the checks listed there. The headphone lead is the aerial, and
+audio needs the ADSP FM routing wired into the sound card separately.
 
 ## Order worth doing them in
 
 1. **NFC** — a node and a flash.
-2. **Modem** — one command, then diagnosis.
+2. **Modem** — try lk2nd, then the Z2's own ADSP firmware.
 3. **Suspend** — investigate two drivers.
 4. **Headphones** — forward-port an existing 7,000-line driver.
 5. **Camera** — forward-port existing msm8974 camss and CCI work, then
    identify and drive the two sensors.
-6. **FM** — driver written; compile it, load it, and work down the list
-   in `../drivers/fm/README.md`.
+6. **FM** — rebuild the kernel with media support, load, and work down
+   the list in `../drivers/fm/README.md`.

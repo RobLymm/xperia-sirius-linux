@@ -28,11 +28,11 @@ apply to all four devices, not only the Z2.
 | Audio, headphones and microphones | Not working. Needs a WCD9320 codec driver and SLIMbus on msm8974 | `drivers/audio/README.md` |
 | Battery percentage | Working, via VADC VBAT_SNS and an OCV table | `drivers/battery/` |
 | Sensors | Working. Accelerometer, gyroscope, magnetometer, barometer, light and proximity | `upstream/` |
-| Modem | Boots, then stalls during initialisation | `docs/modem.md` |
+| Modem | Boots, then stalls during initialisation; firmware and memory ruled out | `docs/modem.md` |
 | Suspend and resume | Not working. Resume loses Wi-Fi and touch | `docs/known-problems.md` |
 | NFC | Not tested. NXP PN547; mainline driver exists, node written | `docs/nfc.md` |
 | Camera | Not attempted. ISP support exists for msm8974 elsewhere; the sensors need drivers | `docs/camera.md` |
-| FM radio | Driver written, never run. Nothing else exists anywhere for this tuner | `drivers/fm/` |
+| FM radio | Driver written and compiles; needs a kernel with media support to load | `drivers/fm/` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually

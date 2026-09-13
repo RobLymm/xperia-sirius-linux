@@ -54,8 +54,8 @@ way to find out whether something is possible on this SoC at all. Two things
 read off it directly:
 
 - **The modem works on msm8974 mainline, since v5.6.** So the stall documented
-  in `modem.md` is a device-specific problem — firmware or memory regions —
-  not a missing driver.
+  in `modem.md` is a device-specific problem, not a missing driver. Firmware
+  and memory regions have since been ruled out.
 - **FM on the WCN3680 is "No driver"** for someone who has been working on this
   SoC for years. That corroborates FM being genuinely unwritten rather than
   merely hard to find.
