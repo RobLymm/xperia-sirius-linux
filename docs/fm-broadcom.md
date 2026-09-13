@@ -28,6 +28,18 @@ No signal yet — RSSI `0x80`, SNR `0x02`, unchanged by tuning — which is what
 a phone with no headphones plugged in should show, since the headphone lead
 is the aerial.
 
+## Radio 1, identified
+
+With headphones plugged in as the aerial, a sweep of the band found clear
+stations, and `../tools/bcm-fm-rds.py` decoded their RDS:
+
+    98.9 MHz   -68 dBm  SNR 29   PI C201   "BBC R1  "
+    89.3 MHz   -65 dBm  SNR 37   PI C202   "BBC R2  "
+   101.1 MHz   -60 dBm  SNR 36   PI C2A1   "Classic "
+
+The tuner, the aerial path and RDS all work. What is missing is audio: see
+step 2 below.
+
 ## The protocol
 
 From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
@@ -61,6 +73,11 @@ From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
    internal FM port at all, so the step is to add `INT_FM_TX` (AFE port
    0x3005) to q6afe and q6routing; capturing it on MultiMedia1 and playing it
    through the working speaker path then needs no WCD9320.
+
+   On the Broadcom side, Sony's `fm_rx_config_audio_path` shows the whole
+   recipe: set `FM_AUDIO_I2S_ON` (bit 5) in AUD_CTL0, clear the manual mute
+   (bit 1), and write PCM_ROUTE back unchanged; no extra vendor command is
+   needed when FM I2S is not being redirected over the Bluetooth PCM pins.
 3. **A kernel driver.** Mainline has no Broadcom FM driver. Userspace control
    is enough to prove and use the tuner; a V4L2 driver over `btbcm` vendor
    commands, modelled on Sony's, is the eventual form.
