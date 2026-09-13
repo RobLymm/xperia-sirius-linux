@@ -63,8 +63,6 @@ preprocessor with the kernel's include paths before `dtc` sees it.
 build machine, `dtc` on the phone, which has it. An unpatched
 `v6.16.12-msm8974` tree is enough for the board file; SoC-level patches, such
 as CPU frequency scaling, are picked up if they are applied to that tree.
-`../tools/update-latest.sh` runs `dtc` without `cpp`, so it only works on
-self-contained trees and cannot build this file.
 
 `../tools/phone-build-img.sh` then packs the kernel and the DTB into a boot
 image with `mkbootimg-osm0sis`.

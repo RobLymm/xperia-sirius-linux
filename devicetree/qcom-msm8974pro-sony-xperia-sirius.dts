@@ -468,7 +468,7 @@
 };
 
 &soc {
-	sound@fe02f000 {
+	sound: sound@fe02f000 {
 		compatible = "qcom,msm8974-sndcard";
 		reg = <0xfe02f000 0x4>;
 		reg-names = "lpaif_quat_mode_muxsel";
