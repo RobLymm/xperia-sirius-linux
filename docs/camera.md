@@ -30,13 +30,24 @@ both with `qcom,mount-angle = <0x10e>`, 270 degrees.
 Sony's stock system partition narrows the parts down: tuning files
 `vendor/camera/SOI20BS0_IMX200.dat` (a 20 MP module) and
 `LGI02BN1_IMX132.dat` / `SEM02BN1_IMX132.dat` (2 MP modules from two
-suppliers), plus a leftover `libchromatix_imx135_liveshot.so`. So the rear is
-most likely an IMX200 and the front an IMX132, with the front module sourced
-from two vendors. The sensor ID registers will confirm once the CCI bus works.
-No mainline or out-of-tree driver was found for IMX200, IMX132 or IMX135; the
+suppliers), plus a leftover `libchromatix_imx135_liveshot.so`.
+
+**Rear part number is unresolved: IMX200 vs IMX220.** This unit's stock tuning
+file names `IMX200`, which is the strongest evidence from the actual device.
+Public Xperia Z2 specs and the sibling ZL2 wiki instead say the 20.7 MP rear
+is a Sony **IMX220**. The two disagree; do not assume either. The chip's ID
+register, read over CCI once the bus is up (stage 2), is what settles it, and
+the driver written in stage 4 depends on the answer. Front is an IMX132, from
+two module vendors.
+
+No mainline driver exists for IMX200, IMX220, IMX132 or IMX135 (IMX132 appears
+only in the old `staging/media/atomisp`, Intel-coupled and unusable here). The
 nearest prior art is the IMX300 driver written by reverse-engineering Sony
-Xperia userspace sensor drivers. Sony's device tree itself only says
-`sony_camera_0` and `sony_camera_1`; each module also has an EEPROM at 0xa0.
+Xperia userspace, and the msm8996 IMX318 "first photo" write-up. Register and
+power sequences come from Sony's downstream CAF Android sensor driver
+(`drivers/media/platform/msm/camera_v2/sensor/…`), with `imx258` or the 2024
+20 MP `imx283` as the closest structural templates. Sony's device tree itself
+only says `sony_camera_0` / `sony_camera_1`; each module has an EEPROM at 0xa0.
 
 ## What already exists
 
@@ -45,7 +56,7 @@ the Nexus 5:
 
     a990f998b  [WIP] dts msm8974: add CAMSS         Luca Weiss, 2022
     051d2027d  [WIP] dts msm8974: add CCI bus
-    be6e07586  [HACK] CCI driver for msm8974
+    be6e07586  [HACK] CCI driver for msm8974        (now obsolete, see below)
     5a36d2a51  media: camss: HACK for msm8974       Jonathan Marek, 2019
     2f441d048  media: imx179 HACK driver
     2a54eac74  [WIP] dts hammerhead configure rear camera
@@ -56,6 +67,14 @@ The two things worth knowing from it:
 `compatible = "qcom,msm8916-camss"`. No new camss variant was written. That
 matches the hardware: msm8974's VFE is `qcom,vfe40`, the generation camss
 implements as `camss-vfe-4-1.c` for msm8916.
+
+**CCI is no longer a hack — it is upstream in this kernel.** The
+msm8974-mainline fork's `qcom-msm8974.dtsi` already has
+`cci: cci@fda0c000 { compatible = "qcom,msm8974-cci"; ... status = "disabled";
+}` with clocks, pinctrl and both `cci_i2c0` / `cci_i2c1` buses, and
+`i2c-qcom-cci.c` matches `qcom,msm8974-cci` to its v1.5 data (line ~790).
+So the be6e07586 CCI hack above is obsolete: CCI needs only `status = "okay"`
+and the sensor child nodes, no driver work.
 
 **Every address and interrupt in their node is identical to the table above**,
 which was derived independently from Sony's tree here. Two independent
@@ -69,8 +88,21 @@ Jonathan Marek's camss patch is about 150 lines and does three things:
   constraint that forces the GPU onto a VRAM carveout on this SoC
 - takes DMA addresses with `vb2_dma_contig_plane_dma_addr` instead of walking
   a scatter-gather table
-- uses the 8x96 ISPIF interrupt handler for 8x16, consistent with msm8974
-  reporting `qcom,ispif-v3.0`
+- uses the 8x96 ISPIF interrupt handler (`ispif_isr_8x96`) for this ISPIF,
+  consistent with msm8974 reporting `qcom,ispif-v3.0`
+
+That branch is 5.17-era and selected its per-SoC resource structs with
+`of_device_is_compatible()` in probe. Mainline 6.16 has since refactored to
+`struct camss_subdev_resources` (id/hw_ops/formats embedded per entry)
+aggregated into a per-SoC `struct camss_resources` chosen via `.data` in the
+of_match table. So z3ntu's *data* (register names, clock lists, the 3 CSIPHY /
+4 CSID / 1 ISPIF / 2 VFE counts, the ISPIF-8x96 routing, VFE 4.1 formats) is
+directly reusable, but must be re-expressed as new `*_res_8974[]` tables plus
+a `msm8974_resources` and a real `qcom,msm8974-camss` compatible with a
+binding — cleaner than z3ntu's hack of binding to `qcom,msm8916-camss` and
+overriding the tables. Mainline VFE ops include `vfe_ops_4_1` (what msm8916
+uses); there is no `vfe_ops_4_0`, so 4.1 is the one to reuse. Estimated days,
+not weeks: the hardware facts are all known.
 
 ## The device tree node
 
@@ -108,6 +140,67 @@ camss: camss@fda00000 {
 
 The CPP and CCI blocks are missing from it, as their version notes.
 
+### Stage 3 implementation spec (6.16 camss)
+
+Confirmed from `drivers/media/platform/qcom/camss/camss.{c,h}` in the fork.
+Model everything on the msm8916 tables (`csiphy_res_8x16`, `csid_res_8x16`,
+`ispif_res_8x16`, `vfe_res_8x16`, aggregated in `msm8916_resources`).
+
+- Fill one `struct camss_subdev_resources` per block —
+  `{ regulators[], clock[], clock_for_reset[], clock_rate[][], reg[],
+  interrupt[], union { csiphy | csid | vfe } }`. `reg[]` and `interrupt[]` are
+  the reg-names / interrupt-names strings the driver looks up, so they must
+  match the DT node (`csiphy0`, `csid0`, `ispif`, `vfe0`, …).
+- Aggregate into a `msm8974_resources` (`struct camss_resources`) with
+  `version`, `pd_name`, the four `*_res` tables, and the counts
+  **`csiphy_num = 3`, `csid_num = 4`, `vfe_num = 2`** (ISPIF is a single
+  struct, not counted). Add `qcom,msm8974-camss` to the of_match `.data`.
+- `version`: reuse **`CAMSS_8x16`** (VFE 4.1, the `vfe_ops_4_1` path z3ntu
+  used) rather than a new enum, but three behaviours are keyed on version and
+  need checking against msm8974: (1) the **ISPIF interrupt handler** — z3ntu
+  switched to `ispif_isr_8x96`; (2) **dual VFE** — 8x16 ships `vfe_num = 1`, so
+  the two-VFE path (present for 8x96) must be exercised with `vfe_num = 2`;
+  (3) **CSIPHY type** — msm8974 uses the older 2-phase CSIPHY like 8x16
+  (`camss-csiphy-2ph-1-0.c`), not the 3-phase one. If 8x16's version gates any
+  of these wrong for two VFEs, a `CAMSS_8x74` enum is the fallback.
+- Carry z3ntu's no-IOMMU change in `camss-video.c`
+  (`vb2_dma_contig_*` instead of `vb2_dma_sg_*`) — msm8974 has no camera IOMMU.
+
+This needs a media-configured kernel build to compile and hardware to test the
+ISPIF/dual-VFE paths, so it is a build-and-iterate job, not a blind patch.
+
+## Device tree for stage 2 (verified references)
+
+Everything here was checked against the msm8974-mainline fork sources and
+Sony's stock tree, so it is a starting point, not a guess — but it is untested
+(the kernel has no media/CCI config yet, and there is no sensor driver, so the
+nodes will not probe until stage 4).
+
+- **Enable CCI:** `&cci { status = "okay"; };`. Both buses (`cci_i2c0`,
+  `cci_i2c1`) and their pins (`cci_default`: gpio19/20 `cci_i2c0`, gpio21/22
+  `cci_i2c1`) are already in `qcom-msm8974.dtsi`.
+- **MCLK:** rear gpio15 function `cam_mclk0`, clock `CAMSS_MCLK0_CLK` (mmcc 77);
+  front gpio17 function `cam_mclk2`, clock `CAMSS_MCLK2_CLK` (mmcc 79). Add
+  pinctrl states for these (they are single-pin `cam_mclk0`/`cam_mclk2`
+  functions in `pinctrl-msm8x74.c`).
+- **Reset:** rear gpio94, front gpio18, both as plain `gpio` function,
+  `reset-gpios = <&tlmm 94 GPIO_ACTIVE_LOW>` / `<&tlmm 18 GPIO_ACTIVE_LOW>`.
+- **Rails** (labels exist in shinano-common unless noted):
+  `vdig` = `pm8941_l3` (1.2 V), `vana` = `pm8941_l17` (2.7 V),
+  `vaf` = `pm8941_l23` (2.8 V, rear only). `vio` is Sony's **LVS2**, and
+  `pm8941_lvs2` is **not defined** in this tree (only `pm8941_lvs3` is) — it
+  must be added to the pm8941 `regulators` node (group `vdd_l2_lvs1_2_3` on
+  `pm8941_s3`). `pm8941_lvs1` is likewise referenced by the board but check it
+  is defined before reusing.
+- **I2C addresses:** rear sensor 0x20 (7-bit 0x10) on `cci_i2c0`, front 0x6c
+  (7-bit 0x36) on `cci_i2c1`; each EEPROM at 0xa0 (7-bit 0x50).
+
+Bare identification without a sensor driver needs the rails, MCLK and reset
+brought up by hand — mainline sensor drivers manage their own supplies on
+probe, so with no driver the rails stay off and the part will not ACK. Either
+a throwaway stub i2c driver that enables them, or a temporary regulator
+consumer in the DT, is needed to read the chip ID with `i2ctransfer`.
+
 ## What is actually left
 
 **The sensors.** Mainline has no driver for either part. `drivers/media/i2c`
@@ -118,13 +211,32 @@ marked HACK.
 
 So the order is:
 
-1. Confirm the two parts — IMX200 rear and IMX132 front on current evidence —
-   from the sensor ID registers once the CCI bus is up.
-2. Get CCI working, which needs the msm8974 CCI hack forward-ported.
-3. Bring up camss against `qcom,msm8916-camss` with the patch above
-   forward-ported from 5.17 to current.
+1. Enable CCI (`&cci { status = "okay"; }`) and add the two sensor nodes on
+   `cci_i2c0` (rear, 0x20) and `cci_i2c1` (front, 0x6c). Node and driver are
+   already in this fork; no forward-port needed. Needs `CONFIG_I2C_QCOM_CCI`.
+2. Power the rails and read the sensor ID registers over CCI with
+   `i2ctransfer` to confirm the two parts — IMX200 rear and IMX132 front on
+   current evidence — and save the two EEPROMs (0xa0).
+3. Bring up camss against `qcom,msm8916-camss` with Jonathan Marek's patch
+   (contiguous DMA, no IOMMU; 8x96 ISPIF handler) forward-ported from 5.17 to
+   6.16, where the resource tables are now `camss_subdev_resources` collected
+   in a per-SoC `camss_resources`. Needs `CONFIG_VIDEO_QCOM_CAMSS` and the
+   media stack, which this kernel is built without (the single blocker:
+   camera-plan.md stage 1).
 4. Write or adapt a driver for each sensor.
 
-Steps 1 to 3 are porting and wiring. Step 4 is the real work, and it is per
-sensor. None of it is speculative any more, which is the difference between
-this and where the assessment started.
+5. Userspace: libcamera's `simple` pipeline handler with the software ISP is
+   essentially the qcom-camss path (SoftISP was first enabled for qcom-camss),
+   and handles 8/10-bpp unpacked RAW Bayer — enough for preview and stills. No
+   msm8974 tuning exists, so the Z2 would be first.
+
+Steps 1 to 3 are porting and wiring; step 1 is now just device tree. Step 4 is
+the real work, and it is per sensor. None of it is speculative any more, which
+is the difference between this and where the assessment started.
+
+Biggest risks: the no-IOMMU contiguous DMA needs a CMA reservation big enough
+for 20 MP RAW10 buffers (the same VRAM/CMA pressure the GPU already has); the
+dual-VFE ISPIF routing is the least-tested camss code; and the rear sensor's
+power and register sequence is the main reverse-engineering unknown (and which
+part it even is — see the IMX200/IMX220 question above). The front IMX132 is a
+later, separate effort.

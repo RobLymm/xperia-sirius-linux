@@ -6,10 +6,14 @@ order of work, what each stage needs and how each is proven done.
 
 ## What is already known
 
-**Sensors.** Rear: most likely a Sony **IMX200** (stock tuning file
-`SOI20BS0_IMX200.dat`, a 20 MP module), with autofocus. Front: a Sony
-**IMX132** (`LGI02BN1_IMX132.dat`, `SEM02BN1_IMX132.dat`, 2 MP, two module
-suppliers), fixed focus. Neither has a Linux driver anywhere found.
+**Sensors.** Rear: 20 MP with autofocus, part number unresolved — this unit's
+stock tuning file says **IMX200** (`SOI20BS0_IMX200.dat`), but public Z2/ZL2
+specs say **IMX220**. Settle it by reading the chip ID over CCI in stage 2
+before writing the stage-5 driver; do not assume. Front: a Sony **IMX132**
+(`LGI02BN1_IMX132.dat`, `SEM02BN1_IMX132.dat`, 2 MP, two module suppliers),
+fixed focus. Neither part has a mainline Linux driver (IMX132 exists only in
+the unusable `staging/media/atomisp`); `imx258`/`imx283` are the closest
+templates and register sequences come from Sony's downstream CAF driver.
 
 **Wiring**, from Sony's stock device tree:
 
@@ -57,6 +61,16 @@ Needs a kernel rebuild; everything else depends on it.
     CONFIG_V4L2_FWNODE=m
     CONFIG_VIDEO_QCOM_CAMSS=m      (after stage 3's Kconfig change)
     CONFIG_I2C_QCOM_CCI=m
+    CONFIG_VIDEOBUF2_DMA_CONTIG=m  (stage 3 selects it; msm8974 has no camera IOMMU)
+
+Config audit of the aport (2026-09-13, `config-postmarketos-qcom-msm8974.armv7`):
+none of the above are set yet — `MEDIA_SUPPORT` and `I2C_QCOM_CCI` are
+explicitly "not set", the rest absent. This is the **only** kernel-config work
+the next stages need: NFC (`NFC_NXP_NCI`/`NFC_NCI`/`NFC_PN544`) and SLIMbus
+(`SLIMBUS`, `SLIM_QCOM_NGD_CTRL`) are **already `=m` in the config**, so NFC and
+the future WCD9320 audio path need no config change — only device tree (NFC) or
+a codec driver (audio). So one media-stack addition to the next kernel build
+unblocks the camera; fold it in with any other pending kernel change.
 
 **Done when** `/dev/media0` can exist, i.e. the media core loads.
 
@@ -72,8 +86,9 @@ Device tree only, no driver work:
 Then power the rails, release reset, and read the sensor ID registers and the
 two EEPROMs with `i2ctransfer` on the CCI buses.
 
-**Done when** both chip IDs read back and confirm IMX200 and IMX132 (or
-correct the identification), and the EEPROM contents are saved.
+**Done when** both chip IDs read back: the front IMX132, and the rear part,
+which the read decides between IMX200 and IMX220 (or corrects entirely). Save
+the EEPROM contents.
 
 ## Stage 3 — CAMSS for msm8974
 
@@ -108,7 +123,7 @@ quickest end-to-end proof.
 **Done when** `v4l2-ctl --stream-mmap` captures valid Bayer frames from the
 front camera.
 
-## Stage 5 — rear sensor driver (IMX200)
+## Stage 5 — rear sensor driver (IMX200/IMX220)
 
 Same method, larger: 20 MP, four lanes, plus the autofocus voice-coil actuator
 on L23 (its own small I2C driver, part to be identified from Sony's tree) and
