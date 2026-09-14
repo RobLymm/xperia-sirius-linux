@@ -25,6 +25,84 @@ its own DSP). Two pieces were missing.
 sets the DAI formats. Needs a Kconfig entry (`SND_SOC_MSM8974`) and a Makefile
 line alongside the other qcom machine drivers.
 
+It also turns a **codec-less back end** (a link with a `platform` but no
+`codec`) into a DPCM back end instead of the front end `qcom_snd_parse_of()`
+would otherwise make it, and gives it word-select-consumer ops (word select
+taken from outside; LPASS still runs its own bit clock, because the LPAIF
+MI2S block cannot consume an external one). That is how FM audio is captured
+(see below): an AFE port wired to another chip that clocks the bus itself.
+`drivers-wip/msm8974-sndcard-fm-backend.diff` is this change as a diff against
+the speaker-only driver.
+
+## FM radio audio
+
+The FM tuner is in the Broadcom BCM4335C0 Bluetooth chip. Its digital audio
+leaves the chip as I2S on the pads Sony wires to the SoC's **secondary MI2S**
+(gpio79 bit clock, gpio80 word select, gpio81 data in). The chip is the I2S
+master (vendor command `0xFC61` `05 19 18 18 18`); LPASS consumes its clocks.
+So the route is:
+
+    Broadcom FM I2S (chip = master) -> SECONDARY_MI2S_TX (q6afe, already in
+    mainline) -> q6routing -> its own MultiMedia front end -> capture
+
+No q6afe change is needed for this: `SECONDARY_MI2S_TX` exists upstream. The
+only kernel change is the codec-less back-end handling above. The device tree
+adds a `sec-mi2s-dai-link` (cpu `SECONDARY_MI2S_TX`, platform q6routing), a
+second q6asm front end for capture, and the `sec_mi2s` pinctrl; see the FM
+variant in `../../devicetree/` and `../../docs/fm-broadcom.md`.
+
+### The 41.6 Hz "flicking" and the fmrepair plugin
+
+The raw capture carries a periodic click train: a burst of ~30 corrupted
+frames every ~1152 frames (24 ms), about half of the samples in a burst being
+the true value with bit 15 flipped. It is on every station at the same level,
+independent of aerial, signal strength and power, and it is in the captured
+samples (a recording plays it back on any machine).
+
+Measured cause (2026-09-14; captures analysed offline, clocks timed on the
+pads through /dev/mem — `../../tools/fm-diag/`):
+
+- The chip's word-select clock is 48000.6 Hz and the capture DMA delivers
+  48000.0 Hz: the frame clocks match, so no frames are dropped or repeated.
+- The chip is a fixed I2S master on its own 37.4 MHz crystal, driving bit
+  clock, word select and data. The LPAIF MI2S receiver always shifts data on
+  its own bit clock from the SoC's 19.2 MHz reference. The two bit clocks are
+  ~27 ppm apart, so their phase slides through one bit period every ~24 ms;
+  once per cycle the word-select edge lands on LPASS's sampling edge and the
+  first data bit of each word — the sign bit — is sampled at its transition
+  for ~0.6 ms. The burst period drifts slowly with temperature, which is how
+  it was recognised as a clock beat rather than a fixed block size.
+
+Not fixable at the link: the chip sends no data as an I2S slave (pin function
+7, even with LPASS clocks running before its I2S block is enabled); the AFE
+I2S configuration has no bit-clock polarity or justification field; and the
+chip's pad drive strength, the LPASS bit-clock rate and an AFE request for an
+external bit clock all leave the glitch rate unchanged. Flipping the sign bit
+back in software sounded worse — the corrupted samples are not cleanly
+recoverable — so they are treated as lost.
+
+**`fmrepair/`** is the fix in use: an ALSA external PCM plugin that exposes
+the raw MultiMedia2 capture as `sirius_fm` (`sirius_fm:CARD=0,DEV=3`). It
+clusters outlier samples into bursts, tracks their ~1152-frame period, and
+replaces each burst window with linear interpolation between the good frames
+either side, on both channels; every other frame passes through unchanged
+(3–4 % of frames are touched; 4 ms delay). Live result: 0–1 glitches per
+second against ~900 on the raw device. `fmrepair/install.sh` builds it
+(alsa-lib-dev, `-DPIC`) and installs the plugin and `60-sirius-fm.conf`; the
+FM app and `tools/fm-play.sh` read from `sirius_fm` when it is present.
+
+The clean long-term route is the one Sony shipped: the tuner's own DAC
+(AUD_CTL0 bit 4) into the WCD9320 codec's analogue inputs (ADC5/ADC6 →
+SLIM_0_TX), which has no digital link to corrupt. That waits on the WCD9320 +
+SLIMbus bring-up headphones need anyway. FM over the chip's SCO/PCM block is
+voice-band and not worth pursuing.
+
+`0014-ASoC-qdsp6-add-the-internal-FM-capture-port.patch` was the **first**
+attempt — the LPASS "internal FM" port (INT_FM_TX, AFE 0x3005) that Sony's
+stock mixer paths name. On mainline it captured only zeros: the tuner's I2S
+does not reach that port, it reaches the secondary MI2S pads. 0014 is kept
+only as documentation of the port; it is not used and not needed.
+
 **`0001-ASoC-qdsp6-q6afe-send-both-LPAIF-clocks-in-one-comman.patch`** is the
 q6afe fix, generated against 6.16.12 and verified to apply cleanly to a
 pristine tree. checkpatch passes with one deliberate exception: there is no
@@ -97,9 +175,37 @@ kernel work, and `alsa-ucm-conf` accepts contributions on GitHub. It is
 probably the highest value per hour of anything left in this directory.
 
 **Headphones, earpiece and microphones.** These are on a WCD9320 (Taiko)
-codec, which sits on SLIMbus. On msm8974 the SLIMbus master is inside the
-ADSP, so two things are needed: msm8974 support in mainline's `qcom-ngd-ctrl`
-(which currently handles v1.5.0 and v2.1.0 only), and a WCD9320 codec driver.
-The closest model for the latter is mainline's `wcd9335`, which is the same
-family and also SLIMbus. Sony's stock device tree has the micbias and routing
-configuration. This is a substantial piece of work, not an afternoon.
+codec on SLIMbus, whose master is inside the ADSP (an NGD satellite on the
+apps side). Two pieces are needed, and both have prior art on the same SoC —
+this is a forward-port, not a from-scratch driver.
+
+- *SLIMbus.* Mainline's `qcom-ngd-ctrl` already handles NGD v1.5.0 (msm8996)
+  and v2.1.0 (sdm845); the Fairphone 2 / Nexus 5 work declares the msm8974
+  `slim@fe12f000` node as `compatible = "qcom,slim-ngd-v1.5.0"` with a
+  `slimbam` BAM, reusing the v1.5.0 path — so this is device tree plus
+  `CONFIG_SLIM_QCOM_NGD_CTRL`, not a controller rewrite. There is no slim node
+  in mainline `qcom-msm8974.dtsi` yet. NGD probe depends on the ADSP framer
+  and a PDR lookup for `avs/audio`; the Z2's q6afe/q6asm already run, so APR is
+  up, which is the favourable half.
+- *Codec.* No mainline WCD9320/Taiko driver exists (v6.16 has wcd9335,
+  wcd934x, wcd937x/938x/939x, msm8916-wcd, and the shared `wcd-mbhc-v2` /
+  `wcd-clsh-v2`, but no 9320/9310/9330). An out-of-tree one does:
+  **flto's `wcd9320.c` (+ `wcd9320_b.c`, `.h`)**, GPL-2.0, ~4-5k lines, a
+  `module_slim_driver` using `regmap_init_slimbus` and the shared
+  `wcd_clsh_ctrl`, with `MCLK 9.6 MHz` matching Sony's tree. It lives on
+  `z3ntu/linux:flto-msm8974-5.11` and `msm8974-mainline/linux:flto-msm8974`,
+  was never submitted upstream, and is not yet rebased past 5.11. On the
+  Fairphone 2 (same SoC) z3ntu records headphone audio as "kind of works".
+
+Path for the Z2: pull flto's `wcd9320.*` and rebase onto 6.16 (compare
+mainline `wcd9335.c`, 5169 lines, for the ASoC/regmap drift); add the DT
+(slim NGD node, `taiko_ifd`, `codec@1` `slim217,0a0`, micbias, mclk); wire the
+Taiko SLIMbus RX/TX q6afe DAIs and headphone/AMIC DAPM as a second path beside
+the Quaternary MI2S → TFA9890 speaker route; enable `SND_SOC_WCD9320`,
+`SLIM_QCOM_NGD_CTRL`. Debug NGD probe / ADSP PDR first — if the framer never
+starts, nothing downstream enumerates. Moderate scale, and de-risked by flto
+having proven the whole chain on the FP2.
+
+Sources: `github.com/z3ntu/linux/tree/flto-msm8974-5.11`,
+`github.com/msm8974-mainline/linux/tree/flto-msm8974`,
+`github.com/z3ntu/linux-mainline-files/blob/main/fp2-hw-support.md`.

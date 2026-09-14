@@ -159,14 +159,104 @@ static const struct snd_soc_ops msm8974_be_ops = {
 	.shutdown = msm8974_snd_shutdown,
 };
 
+/*
+ * A back end without a codec is wired straight to another chip. The Broadcom
+ * FM tuner on the secondary MI2S pads is the I2S master (Write_PCM_Pins
+ * function 5: its clock, word-select and data pads are all outputs). Measured
+ * on the pads: gpio80 word select ~48 kHz, gpio79 bit clock ~1.536 MHz,
+ * gpio81 data — all driven by the chip. So LPASS takes the word select from
+ * the chip (BC_FC: q6afe ws_src external) and, because the LPAIF MI2S block is
+ * always its own bit-clock master and cannot consume an external one, it still
+ * generates its own bit clock at the same nominal 1.536 MHz to shift the data
+ * in. That residual two-clock relationship is the cause of the ~41.6 Hz
+ * "flicking" buzz (see sirius-fm-broadcom memory / the app README): the chip's
+ * and LPASS's bit clocks drift, and about 41.6 times a second the first data
+ * bit after word select is sampled on the transition and comes out wrong. It
+ * is not fixable from here — the AFE I2S config has no bit-clock polarity or
+ * justification field, and the chip sends no data as an I2S slave.
+ *
+ * codecless_ws_internal=1 makes LPASS drive word select as well, for a chip
+ * put into slave mode (function 7); left off by default because this chip
+ * sends no FM data as a slave.
+ */
+static bool codecless_ws_internal;
+module_param(codecless_ws_internal, bool, 0644);
+MODULE_PARM_DESC(codecless_ws_internal,
+		 "codec-less back ends: LPASS drives word select as well as the bit clock");
+
+static int msm8974_codecless_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	unsigned int fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF;
+	int ret;
+
+	if (msm8974_mi2s_index(cpu_dai->id) < 0)
+		return 0;
+
+	ret = msm8974_snd_startup(substream);
+	if (ret)
+		return ret;
+
+	fmt |= codecless_ws_internal ? SND_SOC_DAIFMT_BP_FP : SND_SOC_DAIFMT_BC_FC;
+	ret = snd_soc_dai_set_fmt(cpu_dai, fmt);
+	if (ret)
+		dev_warn(rtd->card->dev, "cpu dai format not accepted: %d\n", ret);
+
+	return 0;
+}
+
+static const struct snd_soc_ops msm8974_be_codecless_ops = {
+	.startup = msm8974_codecless_startup,
+	.shutdown = msm8974_snd_shutdown,
+};
+
 static void msm8974_add_ops(struct snd_soc_card *card)
 {
 	struct snd_soc_dai_link *link;
 	int i;
 
+	struct device_node *routing = NULL;
+
+	for_each_card_prelinks(card, i, link)
+		if (link->no_pcm == 1)
+			routing = link->platforms->of_node;
+
 	for_each_card_prelinks(card, i, link) {
+		bool codecless = false;
+
+		/*
+		 * A back end without a codec: an AFE port wired straight to
+		 * another chip, such as the FM tuner's I2S on the secondary
+		 * MI2S pads. qcom_snd_parse_of() turns any link without a codec
+		 * node into a front end, which leaves the MultiMedia capture
+		 * mixers with nothing to route. A front end never names a
+		 * platform of its own (it uses its CPU DAI), so a link that
+		 * names one but no codec is made a back end here, with the
+		 * dummy codec qcom_snd_parse_of() already assigned. The
+		 * platform matters: q6routing records the port's rate and
+		 * channels in its hw_params, and opens the ADM path with them.
+		 */
+		if (link->dynamic &&
+		    link->platforms->of_node != link->cpus->of_node) {
+			link->dynamic = 0;
+			link->no_pcm = 1;
+			link->ignore_pmdown_time = 1;
+			codecless = true;
+		}
+
+		/* Older trees name no platform on the internal FM link. */
+		if (link->id == INT_FM_TX && link->dynamic && routing) {
+			link->dynamic = 0;
+			link->no_pcm = 1;
+			link->ignore_pmdown_time = 1;
+			link->platforms->of_node = routing;
+			codecless = true;
+		}
+
 		if (link->no_pcm == 1) {
-			link->ops = &msm8974_be_ops;
+			link->ops = codecless ? &msm8974_be_codecless_ops :
+						&msm8974_be_ops;
 			link->be_hw_params_fixup = msm8974_be_hw_params_fixup;
 		}
 	}
@@ -186,11 +276,6 @@ static int msm8974_snd_platform_probe(struct platform_device *pdev)
 	card = &data->card;
 	card->dev = dev;
 	card->owner = THIS_MODULE;
-	/*
-	 * Fixed, so that the UCM configuration is found by a stable path
-	 * rather than one derived from the board's model string.
-	 */
-	card->driver_name = "msm8974";
 	dev_set_drvdata(dev, card);
 	snd_soc_card_set_drvdata(card, data);
 

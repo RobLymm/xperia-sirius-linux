@@ -78,17 +78,41 @@ From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
    recipe: set `FM_AUDIO_I2S_ON` (bit 5) in AUD_CTL0, clear the manual mute
    (bit 1), and write PCM_ROUTE back unchanged; no extra vendor command is
    needed when FM I2S is not being redirected over the Bluetooth PCM pins.
-   **Status:** the port is written —
-   `../drivers/audio/0014-ASoC-qdsp6-add-the-internal-FM-capture-port.patch`
-   — built with clang to match the kernel's `CONFIG_CFI_CLANG`, checked for
-   symbol CRC agreement, and installed on the phone under
-   `/lib/modules/6.16.12/updates/qdsp6-fm/`. The device tree needs one extra
-   backend link, "Internal FM Capture" on `INT_FM_TX`; the boot image
-   `images/boot-sirius-fm.img` is the running tree plus exactly that node.
-   `../tools/fm-play.sh 98.9` sets the Broadcom I2S output, routes the port,
-   captures from `hw:0,0` and plays the stream to the sound server's speaker
-   sink. Capture bypasses the sound server because the UCM HiFi profile
-   declares only a Speaker playback device. Not yet run end to end.
+   **Status, 2026-09-13 13:50: FM audio plays through the speaker.** The
+   internal FM port turned out not to be where the audio arrives on Linux:
+   captured from `INT_FM_TX` it is all zeros. The chip's PCM pads are wired
+   to the SoC's secondary MI2S pads (Sony's `qcom,sec-auxpcm-gpio-*`: gpio79
+   clock, gpio80 sync, gpio81 data in). The working route is:
+
+   - vendor command `0xFC61` Write_PCM_Pins `05 19 18 18 18`: the PCM pads
+     carry FM I2S with the chip as clock master (bit clock 1.53 MHz, word
+     select 47.8 kHz, measured on the pads). In slave mode (`07 ..`) the chip
+     sends no data even when LPASS clocks it.
+   - `PCM_ROUTE` bit 7 clear, volume `0xf8` = 255, `AUD_CTL0` = `0x2c`: I2S
+     on, left and right un-muted (bits 2 and 3, which Broadcom's own driver
+     always sets; without them the samples are zero), 50 µs de-emphasis.
+   - LPASS `SECONDARY_MI2S_TX` as a codec-less back end with the CPU DAI as
+     clock consumer, captured on its own front end, MultiMedia2 (MultiMedia1
+     is held by the sound server for the speaker, and a q6asm session serves
+     one direction). Device tree: `int-fm`-style links in the FM variant of
+     the board file; machine driver change in the working project's
+     `drivers-wip/`.
+
+   `sirius-fmd` does the chip side; `../tools/fm-play.sh 98.9` and the app do
+   the rest. Patch 0014 (`INT_FM_TX`) is not needed for audio and stays only
+   as documentation of the port.
+
+   Background "flicking" (a 41.6 Hz click train on every station): the
+   tuner is a fixed I2S master on its own crystal and the LPASS MI2S
+   receiver samples on its own bit clock, so once every ~24 ms the sign
+   bit of a burst of ~30 samples is read at its transition. Not fixable at
+   the link (chip sends nothing as a slave; the AFE has no bit-clock
+   polarity field). Repaired at the ALSA device layer by the `fmrepair`
+   plugin (`drivers/audio/fmrepair`, device `sirius_fm`), which interpolates
+   the burst windows; see `drivers/audio/README.md`. Weak-signal stereo
+   hiss is a separate thing: the optional Mono / Noise-reduction modes sum
+   to mono and low-pass at 12 kHz (the app's `sirius-fm-downmix` helper),
+   as a hardware receiver does.
 
    Two dead ends on the way, worth knowing: the phone's kernel is the
    msm8974-mainline fork, so a device tree compiled from vanilla sources

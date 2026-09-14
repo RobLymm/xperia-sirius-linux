@@ -48,7 +48,7 @@ the others listed there.
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
 | CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |
 | Suspend and resume | Not working | Resume loses Wi-Fi and touch, so suspend is turned off. `docs/known-problems.md` |
-| FM radio | Partly working | The tuner is inside the Broadcom Bluetooth chip; it powers on and tunes from userspace. Reception and audio routing are not yet tested. `docs/fm-broadcom.md` |
+| FM radio | Working | The tuner is inside the Broadcom Bluetooth chip, driven over HCI from userspace; audio arrives on the secondary MI2S port. The I2S link corrupts the sign bit of a burst of samples 41.6 times a second (chip and SoC bit clocks are independent); the `drivers/audio/fmrepair` ALSA plugin repairs it at the device layer. The app, Robwatts FM Radio, is published separately. `docs/fm-broadcom.md`, `drivers/audio/README.md` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
@@ -60,6 +60,7 @@ registers read fine.
 
     drivers/panel/      DRM panel driver, all six Z2 panel variants
     drivers/audio/      ASoC machine driver for the msm8974 sound card
+    drivers/audio/fmrepair/  ALSA plugin: repairs the FM capture's periodic sign-bit bursts (device sirius_fm)
     drivers/battery/    VADC scaling and OCV capacity estimation patches
     drivers/fm/         V4L2 driver for WCNSS FM tuners (other msm8974 phones,
                         not the Z2)
@@ -72,6 +73,7 @@ registers read fine.
     tools/              build the board device tree and a boot image, check that
                         two device trees describe the same hardware, drive the
                         Broadcom FM tuner
+    tools/fm-diag/      how the FM "flicking" was found: capture analysers and a pad clock timer
     docs/               identification, extraction, prior art, and what each
                         unfinished part costs
 
