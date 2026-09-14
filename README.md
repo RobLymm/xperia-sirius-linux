@@ -18,12 +18,16 @@ apply to all four devices, not only the Z2.
 
 ## State of each subsystem
 
-The first eighteen rows are the columns of the postmarketOS device table, in
+The first twenty-two rows are the columns of the postmarketOS device table, in
 the same order, so this phone can be compared directly with the Xperia Z3 and
 the others listed there.
 
 | Feature | State | Detail |
 |---|---|---|
+| Device | Sony Xperia Z2 | Model tested: D6503 |
+| Codename | sony-sirius | Sony's codename is sirius; `sony-sirius` is the postmarketOS device name |
+| Architecture | armv7 | 32-bit ARM. Qualcomm MSM8974AB (Snapdragon 801) with four Krait cores |
+| Release year | 2014 | Announced 24 February 2014 |
 | USB networking | Working | SSH over USB at 172.16.42.1 |
 | Flashing | Working with `fastboot flash boot` | Sony's S1 bootloader boots the boot partition directly. Build the image with `tools/`; see `devicetree/README.md` |
 | Touch | Working | Maxim MAX1187x, out-of-tree driver, Sony's binding. Reports multitouch in evdev protocol A; see `docs/known-problems.md` |
