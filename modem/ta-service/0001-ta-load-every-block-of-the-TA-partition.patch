@@ -1,0 +1,15 @@
+--- a/ta.c	2026-09-15 23:09:34.482263261 +0100
++++ b/ta.c	2026-09-15 23:09:34.089078788 +0100
+@@ -119,9 +119,10 @@
+ 				exit(1);
+ 			}
+ 
++			/* Every block that carries the magic holds units; later
++			 * blocks are parsed later and, being prepended, take
++			 * precedence over earlier copies of the same unit. */
+ 			ta_parse_block(mem + sizeof(struct phys_block));
+-
+-			break;
+ 		}
+ 	}
+ 

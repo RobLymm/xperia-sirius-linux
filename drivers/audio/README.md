@@ -89,7 +89,7 @@ either side, on both channels; every other frame passes through unchanged
 (3–4 % of frames are touched; 4 ms delay). Live result: 0–1 glitches per
 second against ~900 on the raw device. `fmrepair/install.sh` builds it
 (alsa-lib-dev, `-DPIC`) and installs the plugin and `60-sirius-fm.conf`; the
-FM app and `tools/fm-play.sh` read from `sirius_fm` when it is present.
+[Robwatts FM Radio](https://github.com/RobLymm/robwatts-fm-radio) app and `tools/fm-play.sh` read from `sirius_fm` when it is present.
 
 The clean long-term route is the one Sony shipped: the tuner's own DAC
 (AUD_CTL0 bit 4) into the WCD9320 codec's analogue inputs (ADC5/ADC6 →

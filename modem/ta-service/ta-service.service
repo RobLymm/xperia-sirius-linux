@@ -1,0 +1,14 @@
+[Unit]
+Description=Sony TA (trim area) QMI services for the modem
+# The modem asks for TA units early in its init and stalls into its watchdog
+# without an answer, so this must be up before rmtfs starts the modem.
+Before=rmtfs.service
+After=qrtr-ns.service
+
+[Service]
+ExecStart=/usr/local/bin/ta-service /dev/disk/by-partlabel/TA
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

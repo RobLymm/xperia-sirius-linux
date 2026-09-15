@@ -98,7 +98,7 @@ From Sony's kernel, `drivers/bluetooth/broadcom/v4l2_fm_driver/` in LineageOS
      the board file; machine driver change in the working project's
      `drivers-wip/`.
 
-   `sirius-fmd` does the chip side; `../tools/fm-play.sh 98.9` and the app do
+   `sirius-fmd` does the chip side; `../tools/fm-play.sh 98.9` and the [Robwatts FM Radio](https://github.com/RobLymm/robwatts-fm-radio) app do
    the rest. Patch 0014 (`INT_FM_TX`) is not needed for audio and stays only
    as documentation of the port.
 

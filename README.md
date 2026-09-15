@@ -37,10 +37,10 @@ the others listed there.
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
 | 3D | Partly working | Adreno 330 through freedreno runs the compositor. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer. Needs a VRAM carveout. `docs/known-problems.md` |
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer. The light sensor binds but reads 0 lux; proximity responds but is uncalibrated |
-| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. Headphones, earpiece and microphones need the WCD9320 codec, for which a 4.18-era out-of-tree driver exists to port. `drivers/audio/`, `docs/remaining-hardware.md` |
+| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. Headphones and microphones need the WCD9320 codec: a 4.18-era out-of-tree driver has been forward-ported to 6.16 and compiles, with a device tree and boot image ready; not yet booted. The earpiece is the top TFA9890. `drivers/audio/`, `docs/remaining-hardware.md` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
 | Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
-| GPS | Not tested | Runs on the modem, which does not yet finish starting |
+| GPS | Working, no fix yet | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA (GGA/RMC/GSA/VTG/GSV) at 1 Hz and lists 16 satellites; tested indoors, so no signal and no fix. Needs sky view; assistance data (XTRA) needs a data connection. ModemManager exposes it to geoclue once a SIM lets it enable. `modem/` |
 | Mobile data | Not tested | The modem loads its firmware and then stalls during initialisation, so this cannot be tried yet. `docs/modem.md` |
 | SMS | Not tested | Needs the modem |
 | Calls | Not tested | Needs the modem. Calls and Chats are installed |
@@ -48,7 +48,7 @@ the others listed there.
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
 | CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |
 | Suspend and resume | Not working | Resume loses Wi-Fi and touch, so suspend is turned off. `docs/known-problems.md` |
-| FM radio | Working | The tuner is inside the Broadcom Bluetooth chip, driven over HCI from userspace; audio arrives on the secondary MI2S port. The I2S link corrupts the sign bit of a burst of samples 41.6 times a second (chip and SoC bit clocks are independent); the `drivers/audio/fmrepair` ALSA plugin repairs it at the device layer. The app, Robwatts FM Radio, is published separately. `docs/fm-broadcom.md`, `drivers/audio/README.md` |
+| FM radio | Working | The tuner is inside the Broadcom Bluetooth chip, driven over HCI from userspace; audio arrives on the secondary MI2S port. The I2S link corrupts the sign bit of a burst of samples 41.6 times a second (chip and SoC bit clocks are independent); the `drivers/audio/fmrepair` ALSA plugin repairs it at the device layer. The app, [Robwatts FM Radio](https://github.com/RobLymm/robwatts-fm-radio), is published separately. `docs/fm-broadcom.md`, `drivers/audio/README.md` |
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
@@ -74,6 +74,8 @@ registers read fine.
                         two device trees describe the same hardware, drive the
                         Broadcom FM tuner
     tools/fm-diag/      how the FM "flicking" was found: capture analysers and a pad clock timer
+    modem/              what Sony's modem firmware needs from the AP (TA services),
+                        the ta-service fix, and a QMI service honeypot
     docs/               identification, extraction, prior art, and what each
                         unfinished part costs
 
