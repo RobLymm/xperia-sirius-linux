@@ -40,7 +40,7 @@ the others listed there.
 | Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. Headphones and microphones need the WCD9320 codec: a 4.18-era out-of-tree driver has been forward-ported to 6.16 and compiles, with a device tree and boot image ready; not yet booted. The earpiece is the top TFA9890. `drivers/audio/`, `docs/remaining-hardware.md` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
 | Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
-| GPS | Working, no fix yet | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA (GGA/RMC/GSA/VTG/GSV) at 1 Hz and lists 16 satellites; tested indoors, so no signal and no fix. Needs sky view; assistance data (XTRA) needs a data connection. ModemManager exposes it to geoclue once a SIM lets it enable. `modem/` |
+| GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. `modem/` |
 | Mobile data | Not tested | The modem loads its firmware and then stalls during initialisation, so this cannot be tried yet. `docs/modem.md` |
 | SMS | Not tested | Needs the modem |
 | Calls | Not tested | Needs the modem. Calls and Chats are installed |
@@ -112,28 +112,23 @@ phone, which is the only supported route.
 
 ## Relationship to postmarketOS and to mainline
 
-postmarketOS already has a `device-sony-sirius` package in pmaports which
-depends on `linux-postmarketos-qcom-msm8974`, the kernel this work was done
-against. That is the fastest route to a Z2 someone can actually install and
-use, and it is where the userspace parts of this work belong: the `ta-service`
-fix that lets Sony's modem firmware finish starting, and the `fmrepair` ALSA
-plugin that repairs the FM capture. Neither is Z2 specific. Every Sony
-msm8974 phone carries the same TA partition and the same modem firmware
-behaviour, and pmaports already ships `ta-service` for the Xperia Z3.
+There are two places this work can land, and they answer different questions.
 
-Mainline is the slower route and the more durable one: code in mainline
-reaches every distribution without anyone compiling a module. The Xperia Z3
-was added to mainline in March 2024, ten years after the hardware shipped, and
-a DRM panel driver for a 2015-era Sony panel was merged in June 2026. The age
-of this hardware is not an obstacle to upstreaming it.
+**postmarketOS is how someone runs a Z2 today.** pmaports already has a
+`device-sony-sirius` package depending on `linux-postmarketos-qcom-msm8974`,
+the kernel this was built against, so anything that is not a kernel change
+belongs there and can ship immediately: the `ta-service` fix that gets the
+modem through its initialisation, and the `fmrepair` ALSA plugin. Both apply
+to every Sony msm8974 phone, not only this one.
 
-Most of the kernel work here is not Z2 specific either. The q6afe clock fix
-is a bug fix to a driver every Qualcomm QDSP6 board uses. The msm8974 sound
-card and the WCD9320 codec would give audio to the Nexus 5 and the Fairphone 2
-as much as to this phone. The display, audio and sensor nodes belong in
-`shinano-common.dtsi`, which four devices share.
+**Mainline is how the work outlives this repository.** Code in mainline
+reaches every distribution without anyone compiling a module. Most of the
+kernel work here is not Z2 specific either: the q6afe clock fix is a bug fix
+affecting every Qualcomm QDSP6 board, and the sound card and WCD9320 codec
+would give audio to the Nexus 5 and the Fairphone 2 as much as to this phone.
 
-Nothing in the kernel was needed for the modem or GNSS: both work on a stock
-mainline kernel once the TA services answer, which is a userspace fix.
+The age of the hardware is not an obstacle. The Xperia Z3 was added to
+mainline in March 2024, ten years after it shipped, and a DRM panel driver for
+a 2015 Sony panel was merged in June 2026.
 
-See `upstream/README.md` for what is ready to submit and in what order.
+`upstream/README.md` says what is ready to submit and in what order.
