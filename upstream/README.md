@@ -71,7 +71,11 @@ Deliberately left out, with the reason:
   an undocumented compatible would be rejected, so the inherited Synaptics node
   is simply disabled.
 - **Audio.** Needs the msm8974 ASoC machine driver
-  (../drivers/audio/msm8974-sndcard.c) and the q6afe change.
+  (../drivers/audio/msm8974-sndcard.c) and the q6afe change. Both are
+  upstream candidates in their own right; see the submission order below.
+  Headphones additionally need the WCD9320 codec, forward-ported from a
+  4.18-era out-of-tree driver and compiling against 6.16, but not yet
+  booted.
 - **GPU.** Works here only with a VRAM carveout on the kernel command line,
   because msm8974 has no GPU IOMMU support. Not a device tree matter alone.
 - **Battery percentage.** Depends on two out-of-tree patches (0005, 0006 in
@@ -100,16 +104,38 @@ verified on hardware. Before sending the patch, build it in a real kernel tree
 and boot it, accepting that the screen will stay dark until the panel driver
 lands.
 
+### What needed no upstream change at all
+
+The modem and GNSS work on a stock mainline kernel. Sony's modem firmware
+stalls in its own initialisation until the application processor answers its
+TA (trim area) requests over QMI, and the daemon that answers them,
+`ta-service`, is userspace; a one-line fix to it is what finishes the job.
+Nothing in the kernel had to change, and nothing about it is Z2 specific:
+every Sony msm8974 phone carries the same TA partition. See ../modem/.
+
+The FM tuner is likewise driven from userspace over Bluetooth HCI, and the
+periodic corruption in its capture is repaired by an ALSA plugin
+(../drivers/audio/fmrepair/). Neither belongs in the kernel.
+
 ### Submission order
 
-Smallest and most independent first:
+Smallest and most independent first. The first item is not a kernel patch and
+can go immediately:
 
-1. **q6afe fix** (both LPAIF clocks in one command) to alsa-devel. A bug fix,
+1. **`ta-service` TA-block fix** to github.com/andersson/ta-service and to
+   the pmaports package. One line, and it is what lets the modem finish
+   starting on any Sony msm8974 phone. See ../modem/.
+2. **q6afe fix** (both LPAIF clocks in one command) to alsa-devel. A bug fix,
    no new bindings, stands alone.
-2. **This DTS** to linux-arm-msm, plus the Makefile line. Needs no new
+3. **This DTS** to linux-arm-msm, plus the Makefile line. Needs no new
    bindings: every compatible it uses is already documented.
-3. **Panel driver and binding** to dri-devel. See ../panel-variants/ and ../drivers/panel/.
-4. **Display, audio and sensor nodes for the rest of the family** into
+4. **msm8974 sound card machine driver** to alsa-devel. It gives the Nexus 5
+   and the Fairphone 2 the same speaker path, not only the Z2.
+5. **WCD9320 codec driver**, after the machine driver: headphones and
+   microphones for the whole shinano family, and for every other msm8974
+   phone carrying this codec. Compiles against 6.16; not yet booted.
+6. **Panel driver and binding** to dri-devel. See ../panel-variants/ and ../drivers/panel/.
+7. **Display, audio and sensor nodes for the rest of the family** into
    shinano-common.dtsi, once the drivers they need are in.
 
 The postmarketOS side is separate and can move immediately: `device-sony-sirius`
