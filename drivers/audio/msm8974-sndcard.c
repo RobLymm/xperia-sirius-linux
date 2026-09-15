@@ -154,9 +154,60 @@ static int msm8974_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
+#define SLIM_MAX_RX_PORTS	16
+#define SLIM_MAX_TX_PORTS	16
+
+/*
+ * SLIMbus back ends (the WCD9320 headphone codec): the codec hands out the
+ * SLIMbus channel numbers its ports use, and the AFE port must be told them
+ * before it opens, as sdm845.c does. MI2S back ends have nothing to map.
+ */
+static int msm8974_be_hw_params(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dai *codec_dai;
+	unsigned int rx_ch[SLIM_MAX_RX_PORTS], tx_ch[SLIM_MAX_TX_PORTS];
+	unsigned int rx_ch_cnt = 0, tx_ch_cnt = 0;
+	int i, ret = 0;
+
+	switch (cpu_dai->id) {
+	case SLIMBUS_0_RX ... SLIMBUS_6_TX:
+		for_each_rtd_codec_dais(rtd, i, codec_dai) {
+			ret = snd_soc_dai_get_channel_map(codec_dai, &tx_ch_cnt,
+							  tx_ch, &rx_ch_cnt, rx_ch);
+			if (ret == -ENOTSUPP)
+				continue;
+			if (ret) {
+				dev_err(rtd->card->dev,
+					"codec channel map failed: %d\n", ret);
+				return ret;
+			}
+			if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+				ret = snd_soc_dai_set_channel_map(cpu_dai, 0, NULL,
+								  rx_ch_cnt, rx_ch);
+			else
+				ret = snd_soc_dai_set_channel_map(cpu_dai, tx_ch_cnt,
+								  tx_ch, 0, NULL);
+			if (ret) {
+				dev_err(rtd->card->dev,
+					"AFE channel map failed: %d\n", ret);
+				return ret;
+			}
+		}
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+}
+
 static const struct snd_soc_ops msm8974_be_ops = {
 	.startup = msm8974_snd_startup,
 	.shutdown = msm8974_snd_shutdown,
+	.hw_params = msm8974_be_hw_params,
 };
 
 /*
