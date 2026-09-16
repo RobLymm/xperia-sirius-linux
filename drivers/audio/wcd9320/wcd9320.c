@@ -164,6 +164,10 @@ struct wcd9320_codec {
 	struct regmap *if_regmap;
 	struct regmap_irq_chip_data *irq_data;
 
+	bool clocks_started;
+	int ldo_h_users;
+	int adc_users;
+	int cfilt_users[3];
 	struct wcd9320_slim_ch rx_chs[WCD9320_RX_MAX];
 	struct wcd9320_slim_ch tx_chs[WCD9320_TX_MAX];
 	u32 num_rx_port;
@@ -207,7 +211,7 @@ struct wcd9320_codec {
 	int reset_gpio;
 	struct regulator_bulk_data supplies[WCD9320_MAX_SUPPLY];
 
-	unsigned int rx_port_value;
+	unsigned int rx_port_value[WCD9320_RX_MAX];
 	unsigned int tx_port_value;
 	int hph_l_gain;
 	int hph_r_gain;
@@ -271,6 +275,15 @@ struct wcd9320_reg_mask_val {
 	u16 reg;
 	u8 mask;
 	u8 val;
+};
+
+#define NUM_DECIMATORS	10
+
+/* capless filter control registers, indexed the way the device tree counts */
+static const u16 cfilt_ctl_reg[3] = {
+	WCD9320_MICB_CFILT_1_CTL,
+	WCD9320_MICB_CFILT_2_CTL,
+	WCD9320_MICB_CFILT_3_CTL,
 };
 
 static const struct wcd9320_reg_mask_val wcd9320_codec_reg_init[] = {
@@ -429,7 +442,9 @@ static int slim_rx_mux_get(struct snd_kcontrol *kc,
 	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kc);
 	struct wcd9320_codec *wcd = dev_get_drvdata(dapm->dev);
 
-	ucontrol->value.enumerated.item[0] = wcd->rx_port_value;
+	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_widget(kc);
+
+	ucontrol->value.enumerated.item[0] = wcd->rx_port_value[w->shift];
 
 	return 0;
 }
@@ -443,11 +458,24 @@ static int slim_rx_mux_put(struct snd_kcontrol *kc,
 	struct snd_soc_dapm_update *update = NULL;
 	u32 port_id = w->shift;
 
-	wcd->rx_port_value = ucontrol->value.enumerated.item[0];
+	/*
+	 * Setting a mux to the value it already has must do nothing. The
+	 * value used to be kept in one variable shared by all seven ports,
+	 * with no check, so writing any mux twice added a channel that was
+	 * already on a list and turned that list into a loop. The next walk
+	 * of it, in get_channel_map(), then wrote past the end of the
+	 * caller's array until it faulted.
+	 */
+	if (wcd->rx_port_value[port_id] == ucontrol->value.enumerated.item[0])
+		return 0;
 
-	switch (wcd->rx_port_value) {
+	wcd->rx_port_value[port_id] = ucontrol->value.enumerated.item[0];
+
+	/* a port belongs to one interface at a time */
+	list_del_init(&wcd->rx_chs[port_id].list);
+
+	switch (wcd->rx_port_value[port_id]) {
 	case 0:
-		list_del_init(&wcd->rx_chs[port_id].list);
 		break;
 	case 1:
 		list_add_tail(&wcd->rx_chs[port_id].list,
@@ -462,11 +490,11 @@ static int slim_rx_mux_put(struct snd_kcontrol *kc,
 			      &wcd->dai[AIF3_PB].slim_ch_list);
 		break;
 	default:
-		dev_err(wcd->dev, "Unknown AIF %d\n", wcd->rx_port_value);
+		dev_err(wcd->dev, "Unknown AIF %d\n", wcd->rx_port_value[port_id]);
 		goto err;
 	}
 
-	snd_soc_dapm_mux_update_power(w->dapm, kc, wcd->rx_port_value,
+	snd_soc_dapm_mux_update_power(w->dapm, kc, wcd->rx_port_value[port_id],
 				      e, update);
 
 	return 0;
@@ -694,10 +722,51 @@ static int taiko_put_anc_func(struct snd_kcontrol *kc, struct snd_ctl_elem_value
 	return 0;
 }
 
+/*
+ * Each pair of analogue inputs shares a test register holding the two
+ * initialisation bits that reset the converter. Pulse the one belonging to
+ * this input around power-up, and reference count the shared ADC clock.
+ */
 static int taiko_codec_enable_adc(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	printk("%s unimplemented\n", __FUNCTION__);
+	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(comp);
+	u16 adc_reg;
+	u8 init_bit;
+
+	switch (w->reg) {
+	case WCD9320_CDC_TX_1_GAIN: adc_reg = WCD9320_TX_1_2_TEST_CTL; init_bit = 7; break;
+	case WCD9320_CDC_TX_2_GAIN: adc_reg = WCD9320_TX_1_2_TEST_CTL; init_bit = 6; break;
+	case WCD9320_CDC_TX_3_GAIN: adc_reg = WCD9320_TX_3_4_TEST_CTL; init_bit = 7; break;
+	case WCD9320_CDC_TX_4_GAIN: adc_reg = WCD9320_TX_3_4_TEST_CTL; init_bit = 6; break;
+	case WCD9320_CDC_TX_5_GAIN: adc_reg = WCD9320_TX_5_6_TEST_CTL; init_bit = 7; break;
+	case WCD9320_CDC_TX_6_GAIN: adc_reg = WCD9320_TX_5_6_TEST_CTL; init_bit = 6; break;
+	default:
+		dev_err(comp->dev, "unknown ADC register %#x\n", w->reg);
+		return -EINVAL;
+	}
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		if (wcd->adc_users++ == 0)
+			snd_soc_component_update_bits(comp,
+					WCD9320_CDC_CLK_OTHR_CTL, 0x02, 0x02);
+		snd_soc_component_update_bits(comp, adc_reg,
+					      1 << init_bit, 1 << init_bit);
+		break;
+	case SND_SOC_DAPM_POST_PMU:
+		snd_soc_component_update_bits(comp, adc_reg, 1 << init_bit, 0);
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		if (--wcd->adc_users == 0)
+			snd_soc_component_update_bits(comp,
+					WCD9320_CDC_CLK_OTHR_CTL, 0x02, 0x00);
+		if (wcd->adc_users < 0)
+			wcd->adc_users = 0;
+		break;
+	}
+
 	return 0;
 }
 
@@ -822,10 +891,13 @@ static int taiko_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+/*
+ * The shinano phones have no digital microphones; all four are analogue and
+ * go through the converters above. Left unimplemented on purpose.
+ */
 static int taiko_codec_enable_dmic(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	printk("%s unimplemented\n", __FUNCTION__);
 	return 0;
 }
 
@@ -942,10 +1014,35 @@ static int taiko_codec_enable_rx_bias(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+/*
+ * LDO_H supplies the microphone bias block. Downstream counts users of it
+ * through its resource manager and also votes for the bandgap and the RC
+ * oscillator; here the bandgap and clocks are already up whenever a stream
+ * is running, so only the enable bit and a user count are needed.
+ */
 static int taiko_codec_enable_ldo_h(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	printk("%s unimplemented\n", __FUNCTION__);
+	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(comp);
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		if (++wcd->ldo_h_users == 1) {
+			snd_soc_component_update_bits(comp, WCD9320_LDO_H_MODE_1,
+						      BIT(7), BIT(7));
+			usleep_range(1000, 1100);
+		}
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		if (--wcd->ldo_h_users == 0)
+			snd_soc_component_update_bits(comp, WCD9320_LDO_H_MODE_1,
+						      BIT(7), 0);
+		if (wcd->ldo_h_users < 0)
+			wcd->ldo_h_users = 0;
+		break;
+	}
+
 	return 0;
 }
 
@@ -1155,17 +1252,150 @@ static int taiko_config_compander(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+/*
+ * Microphone bias. Each bias output is filtered by one of three capless
+ * filters, and which filter belongs to which bias is a board property: on
+ * the shinano phones bias 1 and 4 use CFILT1, bias 2 uses CFILT2 and bias 3
+ * uses CFILT3. The filter has to be switched on before the bias and off
+ * after it, and is shared, so it is reference counted.
+ *
+ * Dropped from downstream: the headset-detection notifications and the
+ * special handling of bias 2 while headset detection is running. Neither
+ * applies until the MBHC block is driven.
+ */
 static int taiko_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	printk("%s unimplemented\n", __FUNCTION__);
+	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(comp);
+	u16 micb_ctl_reg, micb_int_reg, cfilt_reg;
+	int cfilt;
+
+	if (strnstr(w->name, "MIC BIAS1", sizeof("MIC BIAS1"))) {
+		micb_ctl_reg = WCD9320_MICB_1_CTL;
+		micb_int_reg = WCD9320_MICB_1_INT_RBIAS;
+		cfilt = 0;
+	} else if (strnstr(w->name, "MIC BIAS2", sizeof("MIC BIAS2"))) {
+		micb_ctl_reg = WCD9320_MICB_2_CTL;
+		micb_int_reg = WCD9320_MICB_2_INT_RBIAS;
+		cfilt = 1;
+	} else if (strnstr(w->name, "MIC BIAS3", sizeof("MIC BIAS3"))) {
+		micb_ctl_reg = WCD9320_MICB_3_CTL;
+		micb_int_reg = WCD9320_MICB_3_INT_RBIAS;
+		cfilt = 2;
+	} else if (strnstr(w->name, "MIC BIAS4", sizeof("MIC BIAS4"))) {
+		micb_ctl_reg = WCD9320_MICB_4_CTL;
+		micb_int_reg = WCD9320_MICB_4_INT_RBIAS;
+		cfilt = 0;
+	} else {
+		dev_err(comp->dev, "unknown micbias widget %s\n", w->name);
+		return -EINVAL;
+	}
+
+	cfilt_reg = cfilt_ctl_reg[cfilt];
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		if (wcd->cfilt_users[cfilt]++ == 0) {
+			snd_soc_component_update_bits(comp, cfilt_reg,
+						      BIT(7), BIT(7));
+			usleep_range(1000, 1100);
+		}
+
+		if (strnstr(w->name, "Internal1", 30))
+			snd_soc_component_update_bits(comp, micb_int_reg, 0xE0, 0xE0);
+		else if (strnstr(w->name, "Internal2", 30))
+			snd_soc_component_update_bits(comp, micb_int_reg, 0x1C, 0x1C);
+		else if (strnstr(w->name, "Internal3", 30))
+			snd_soc_component_update_bits(comp, micb_int_reg, 0x03, 0x03);
+
+		snd_soc_component_update_bits(comp, micb_ctl_reg,
+					      1 << w->shift, 1 << w->shift);
+		break;
+	case SND_SOC_DAPM_POST_PMU:
+		/* the bias needs this long to settle before the ADC reads it */
+		usleep_range(20000, 20100);
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		snd_soc_component_update_bits(comp, micb_ctl_reg,
+					      1 << w->shift, 0);
+
+		if (strnstr(w->name, "Internal1", 30))
+			snd_soc_component_update_bits(comp, micb_int_reg, 0x80, 0x00);
+		else if (strnstr(w->name, "Internal2", 30))
+			snd_soc_component_update_bits(comp, micb_int_reg, 0x10, 0x00);
+		else if (strnstr(w->name, "Internal3", 30))
+			snd_soc_component_update_bits(comp, micb_int_reg, 0x02, 0x00);
+
+		if (--wcd->cfilt_users[cfilt] == 0)
+			snd_soc_component_update_bits(comp, cfilt_reg, BIT(7), 0);
+		if (wcd->cfilt_users[cfilt] < 0)
+			wcd->cfilt_users[cfilt] = 0;
+		break;
+	}
+
 	return 0;
 }
 
+/*
+ * A decimator turns one converter's output into a SLIMbus channel. Mute it
+ * while it is being reset and while it is being torn down, and give it a
+ * 150 Hz high pass to keep the microphone bias out of the audio.
+ *
+ * Downstream restores the configured corner frequency from a delayed work
+ * 300 ms after start, so that the filter settles at 150 Hz and then relaxes.
+ * That is left out: the corner stays where the mux control puts it.
+ */
 static int taiko_codec_enable_dec(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	printk("%s unimplemented\n", __FUNCTION__);
+	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	u16 dec_reset_reg, tx_vol_ctl_reg, tx_mux_ctl_reg;
+	unsigned int decimator;
+	char name[16];
+	char *num;
+
+	/* the widget is named "DECn MUX"; take the n */
+	strscpy(name, w->name, sizeof(name));
+	num = strpbrk(name, "123456789");
+	if (!num || kstrtouint(strsep(&num, " "), 10, &decimator) ||
+	    decimator < 1 || decimator > NUM_DECIMATORS) {
+		dev_err(comp->dev, "cannot read a decimator from %s\n", w->name);
+		return -EINVAL;
+	}
+
+	if (w->reg == WCD9320_CDC_CLK_TX_CLK_EN_B1_CTL)
+		dec_reset_reg = WCD9320_CDC_CLK_TX_RESET_B1_CTL;
+	else if (w->reg == WCD9320_CDC_CLK_TX_CLK_EN_B2_CTL)
+		dec_reset_reg = WCD9320_CDC_CLK_TX_RESET_B2_CTL;
+	else
+		return -EINVAL;
+
+	tx_vol_ctl_reg = WCD9320_CDC_TX1_VOL_CTL_CFG + 8 * (decimator - 1);
+	tx_mux_ctl_reg = WCD9320_CDC_TX1_MUX_CTL + 8 * (decimator - 1);
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		snd_soc_component_update_bits(comp, tx_vol_ctl_reg, 0x01, 0x01);
+		snd_soc_component_update_bits(comp, dec_reset_reg,
+					      1 << w->shift, 1 << w->shift);
+		snd_soc_component_update_bits(comp, dec_reset_reg,
+					      1 << w->shift, 0x00);
+		/* 150 Hz corner, high pass enabled */
+		snd_soc_component_update_bits(comp, tx_mux_ctl_reg, 0x30, 0x10);
+		snd_soc_component_update_bits(comp, tx_mux_ctl_reg, 0x08, 0x00);
+		break;
+	case SND_SOC_DAPM_POST_PMU:
+		snd_soc_component_update_bits(comp, tx_vol_ctl_reg, 0x01, 0x00);
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		snd_soc_component_update_bits(comp, tx_vol_ctl_reg, 0x01, 0x01);
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		snd_soc_component_update_bits(comp, tx_mux_ctl_reg, 0x08, 0x08);
+		break;
+	}
+
 	return 0;
 }
 
@@ -1219,10 +1449,22 @@ static int taiko_codec_enable_anc_ear(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+/*
+ * The SLIMbus channels themselves are set up by slim_stream_prepare() and
+ * slim_stream_enable() from the DAI's prepare callback, the same as for
+ * playback, so nothing is left to do per widget. Downstream drives the bus
+ * from here because it predates the SLIMbus stream API.
+ */
 static int taiko_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	printk("%s unimplemented\n", __FUNCTION__);
+	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(comp);
+	struct wcd_slim_codec_dai_data *dai = &wcd->dai[w->shift];
+
+	if (event == SND_SOC_DAPM_POST_PMD)
+		kfree(dai->sconfig.chs);
+
 	return 0;
 }
 
@@ -2070,6 +2312,19 @@ static int wcd9320_hw_params(struct snd_pcm_substream *substream,
 
 	printk("taiko_hw_params rate_index=%d\n", rate_index);
 
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+		/*
+		 * Capture: every decimator carrying this stream is told the
+		 * rate. The playback walk below looks for interpolators fed
+		 * by this DAI and finds none for a capture stream.
+		 */
+		list_for_each_entry(ch, &wcd->dai[dai->id].slim_ch_list, list)
+			snd_soc_component_update_bits(component,
+					WCD9320_CDC_TX1_CLK_FS_CTL + 8 * ch->port,
+					0x07, rate_index);
+		return 0;
+	}
+
 	list_for_each_entry(ch, &wcd->dai[dai->id].slim_ch_list, list) {
 		rx_mix1_inp = ch->port + RX_MIX1_INP_SEL_RX1 - 16; //TAIKO_TX_PORT_NUMBER;
 		WARN_ON(rx_mix1_inp < RX_MIX1_INP_SEL_RX1 || rx_mix1_inp > RX_MIX1_INP_SEL_RX7);
@@ -2203,74 +2458,57 @@ err:
 static int wcd9320_trigger(struct snd_pcm_substream *substream, //int cmd,
 			   struct snd_soc_dai *dai)
 {
-	struct wcd_slim_codec_dai_data *dai_data;
-	struct wcd9320_codec *wcd;
-	struct slim_stream_config *cfg;
-
-	wcd = snd_soc_component_get_drvdata(dai->component);
-
-	static int prepared = 0;
-
-	{
 	struct snd_soc_component *component = dai->component;
-	printk("taiko trigger\n");
+	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(component);
+	struct wcd_slim_codec_dai_data *dai_data = &wcd->dai[dai->id];
+	int ret;
 
-	snd_soc_component_update_bits(component, WCD9320_CDC_CONN_RX_SB_B1_CTL, 0xff, 0x02);
-	snd_soc_component_update_bits(component, WCD9320_CDC_CONN_RX_SB_B1_CTL, 0xff, 0x0a);
+	if (!wcd->clocks_started) {
+		/* central bandgap, then the clock buffers, once */
+		snd_soc_component_write(component, WCD9320_BIAS_CENTRAL_BG_CTL, 0xD4);
+		snd_soc_component_write(component, WCD9320_BIAS_CENTRAL_BG_CTL, 0xD5);
+		snd_soc_component_write(component, WCD9320_BIAS_CENTRAL_BG_CTL, 0x55);
 
-if (!prepared) {
-	snd_soc_component_write(component, WCD9320_BIAS_CENTRAL_BG_CTL, 0xD4);
-	snd_soc_component_write(component, WCD9320_BIAS_CENTRAL_BG_CTL, 0xD5);
-	snd_soc_component_write(component, WCD9320_BIAS_CENTRAL_BG_CTL, 0x55);
+		snd_soc_component_write(component, WCD9320_CLK_BUFF_EN1, 4);
+		snd_soc_component_write(component, WCD9320_CLK_BUFF_EN1, 5);
+		snd_soc_component_write(component, WCD9320_CLK_BUFF_EN2, 0);
+		snd_soc_component_write(component, WCD9320_CLK_BUFF_EN2, 4);
 
-	snd_soc_component_write(component, WCD9320_CLK_BUFF_EN1, 4);
-	snd_soc_component_write(component, WCD9320_CLK_BUFF_EN1, 5);
-	snd_soc_component_write(component, WCD9320_CLK_BUFF_EN2, 0);
-	snd_soc_component_write(component, WCD9320_CLK_BUFF_EN2, 4);
-}
-
-	//snd_soc_component_write(component, WCD9320_CDC_CLSH_V_PA_HD_HPH, 0x0d);
-	//snd_soc_component_write(component, WCD9320_CDC_CLSH_V_PA_MIN_HPH, 0x1d);
-	//snd_soc_component_write(component, WCD9320_CDC_CLSH_IDLE_HPH_THSD, 0x13);
-
-// XXX
-snd_soc_component_write(component, WCD9320_CDC_CLK_RX_B1_CTL, 0x3);
-
-wcd->dai[dai->id].sconfig.bps = 16;
-wcd->dai[dai->id].sconfig.rate = 48000;
-wcd9320_slim_set_hw_params(wcd, &wcd->dai[dai->id], substream->stream);
-
+		wcd->clocks_started = true;
 	}
 
-	dai_data = &wcd->dai[dai->id];
-
-	cfg = &dai_data->sconfig;
-	slim_stream_prepare(dai_data->sruntime, cfg);
-	slim_stream_enable(dai_data->sruntime);
-
-	prepared = 1;
-#if 0
-
-	switch (cmd) {
-	case SNDRV_PCM_TRIGGER_START:
-	case SNDRV_PCM_TRIGGER_RESUME:
-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		cfg = &dai_data->sconfig;
-		slim_stream_prepare(dai_data->sruntime, cfg);
-		slim_stream_enable(dai_data->sruntime);
-		break;
-	case SNDRV_PCM_TRIGGER_STOP:
-	case SNDRV_PCM_TRIGGER_SUSPEND:
-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		slim_stream_unprepare(dai_data->sruntime);
-		slim_stream_disable(dai_data->sruntime);
-		break;
-	default:
-		break;
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		/*
+		 * Sample size for the two SLIMbus RX ports: two bits each,
+		 * 0b10 for 16 bit. The capture side equivalent is set once
+		 * for all ten TX ports in wcd9320_codec_reg_init_val.
+		 */
+		snd_soc_component_update_bits(component,
+				WCD9320_CDC_CONN_RX_SB_B1_CTL, 0x0f, 0x0a);
+		snd_soc_component_write(component,
+				WCD9320_CDC_CLK_RX_B1_CTL, 0x03);
 	}
-#endif
 
-	return 0;
+	dai_data->sconfig.bps = 16;
+	dai_data->sconfig.rate = 48000;
+
+	ret = wcd9320_slim_set_hw_params(wcd, dai_data, substream->stream);
+	if (ret) {
+		dev_err(component->dev, "cannot set SLIMbus parameters: %d\n", ret);
+		return ret;
+	}
+
+	ret = slim_stream_prepare(dai_data->sruntime, &dai_data->sconfig);
+	if (ret) {
+		dev_err(component->dev, "cannot prepare SLIMbus stream: %d\n", ret);
+		return ret;
+	}
+
+	ret = slim_stream_enable(dai_data->sruntime);
+	if (ret)
+		dev_err(component->dev, "cannot enable SLIMbus stream: %d\n", ret);
+
+	return ret;
 }
 
 static int wcd9320_set_channel_map(struct snd_soc_dai *dai,
@@ -2323,8 +2561,11 @@ static int wcd9320_get_channel_map(const struct snd_soc_dai *dai,
 			return -EINVAL;
 		}
 
-		list_for_each_entry(ch, &wcd->dai[dai->id].slim_ch_list, list)
+		list_for_each_entry(ch, &wcd->dai[dai->id].slim_ch_list, list) {
+			if (i == WCD9320_RX_MAX)
+				break;
 			rx_slot[i++] = ch->ch_num;
+		}
 
 		*rx_num = i;
 		break;
@@ -2336,8 +2577,11 @@ static int wcd9320_get_channel_map(const struct snd_soc_dai *dai,
 				tx_slot, tx_num);
 			return -EINVAL;
 		}
-		list_for_each_entry(ch, &wcd->dai[dai->id].slim_ch_list, list)
+		list_for_each_entry(ch, &wcd->dai[dai->id].slim_ch_list, list) {
+			if (i == WCD9320_TX_MAX)
+				break;
 			tx_slot[i++] = ch->ch_num;
+		}
 
 		*tx_num = i;
 		break;
@@ -3623,6 +3867,21 @@ static const struct wcd9320_reg_mask_val wcd9320_codec_reg_init_val[] = {
 
 	/* 0.85 V VBG reference */
 	{WCD9320_BIAS_CURR_CTL_2, 0xFF, 0x04},
+
+	/*
+	 * Microphone bias. The LDO runs at 3.0 V and all three capless
+	 * filters at 2.7 V; the filter register holds that as a fraction of
+	 * the LDO in forty-fourths, less four, which is 38. Bias 1 and 4 are
+	 * filtered by CFILT1, bias 2 by CFILT2 and bias 3 by CFILT3.
+	 */
+	{WCD9320_LDO_H_MODE_1, 0x0C, 0x0C},
+	{WCD9320_MICB_CFILT_1_VAL, 0xFC, 38 << 2},
+	{WCD9320_MICB_CFILT_2_VAL, 0xFC, 38 << 2},
+	{WCD9320_MICB_CFILT_3_VAL, 0xFC, 38 << 2},
+	{WCD9320_MICB_1_CTL, 0x60, 0 << 5},
+	{WCD9320_MICB_2_CTL, 0x60, 1 << 5},
+	{WCD9320_MICB_3_CTL, 0x60, 2 << 5},
+	{WCD9320_MICB_4_CTL, 0x60, 0 << 5},
 
 	/* MAD input microphone is DMIC1 */
 	{WCD9320_CDC_CONN_MAD, 0x0F, 0x08},

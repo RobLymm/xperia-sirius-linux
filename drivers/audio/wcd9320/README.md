@@ -15,10 +15,14 @@ registers its DAIs and controls, and the whole playback path powers up:
 `AIF1 PB` through `SLIM RX1/RX2 MUX`, `RX1/RX2 MIX1`, `CLASS_H_DSM MUX` and
 `HPHL/HPHR DAC` to `HPHL`/`HPHR`.
 
-Capture does not work at all. Every callback on the capture side is still the
-`unimplemented` stub this branch shipped: microphone bias, the ADCs, the
-decimators, the digital microphones, the SLIMbus TX ports and the `LDO_H`
-supply. There is also no jack detection.
+Capture is written but not yet tested on hardware: the six `unimplemented`
+stubs this branch shipped for the capture side, microphone bias, the ADCs,
+the decimators, the digital microphones, the SLIMbus TX ports and the `LDO_H`
+supply, are now ported from Sony's driver. It needs a device tree carrying
+the `SLIMBUS_0_TX` link and the microphone routing, which is in
+`devicetree/qcom-msm8974pro-sony-xperia-sirius-codec.dts`.
+
+There is no jack detection.
 
 ## What the port to 6.16 needed
 
@@ -58,6 +62,18 @@ the phone oopsed on every cold boot, wedged `alsa-restore.service`, and with
 3. **A plain control was treated as a DAPM one.** "ANC Function" is a
    `SOC_ENUM_SINGLE_EXT`, so `snd_soc_dapm_kcontrol_dapm()` does not apply to
    it. The context now comes from the component.
+
+A fourth, reached by setting a route rather than by booting: **all seven
+SLIMbus RX muxes shared one stored value.** Writing a mux therefore never
+looked unchanged, so every write added a channel to an interface's channel
+list even when it was already on it, which turned the list into a loop; the
+next walk of it in `get_channel_map()` wrote past the end of the caller's
+array until it faulted. The stored value is now per port and a write that
+changes nothing returns early, matching mainline's wcd9335. The same bug also
+made `alsactl` save the seventh mux's value for all seven, so a restored
+mixer offered the DSP seven channels for a two channel stream and it refused
+to start the port. Delete `/var/lib/alsa/asound.state` once after updating,
+or the poisoned copy keeps coming back.
 
 ## Two fixes carried over from the earlier 4.18 port
 
@@ -109,9 +125,9 @@ which is what stops the amplifier popping when it powers up.
 
 ## Still to do
 
-- Microphones: six callbacks to port from Sony's driver (`micbias`, `adc`,
-  `dec`, `dmic`, `slimtx`, `ldo_h`), plus SLIMBUS_0_TX links and
-  `audio-routing` in the device tree.
+- Test the capture path on hardware and find what it still needs.
+- Digital microphones: `taiko_codec_enable_dmic` is deliberately left empty,
+  because the shinano phones have none.
 - Jack detection, which needs regmap-irq or an equivalent, and the MBHC
   hardware driven rather than `set_jack` merely storing the pointer.
 - A UCM profile so the audio server can select the jack.

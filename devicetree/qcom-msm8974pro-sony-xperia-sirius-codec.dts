@@ -126,6 +126,39 @@
 };
 
 &sound {
+	/*
+	 * Which microphone sits on which of the codec's analogue inputs, from
+	 * Sony's stock tree. The bias supplies are listed as the source of
+	 * each input so that DAPM powers the right one when a microphone is
+	 * used: AMIC1 and AMIC4 share bias 1, AMIC2 has bias 2 and AMIC3 has
+	 * bias 3. AMIC5 and AMIC6 are the FM tuner's analogue output, which
+	 * is a separate piece of work.
+	 */
+	audio-routing =
+		"AMIC1", "MIC BIAS1 External",
+		"MIC BIAS1 External", "Secondary Mic",
+		"AMIC2", "MIC BIAS2 External",
+		"MIC BIAS2 External", "Headset Mic",
+		"AMIC4", "MIC BIAS1 External",
+		"MIC BIAS1 External", "Handset Mic";
+
+	slim-capture-dai-link {
+		link-name = "Slimbus Capture";
+
+		cpu {
+			sound-dai = <&q6afedai SLIMBUS_0_TX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			/* DAI 1 is wcd9320_tx1, stream "AIF1 Capture" */
+			sound-dai = <&wcd9320 1>;
+		};
+	};
+
 	slim-playback-dai-link {
 		link-name = "Slimbus Playback";
 

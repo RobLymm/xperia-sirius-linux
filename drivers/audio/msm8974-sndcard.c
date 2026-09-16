@@ -313,6 +313,20 @@ static void msm8974_add_ops(struct snd_soc_card *card)
 	}
 }
 
+/*
+ * The four analogue microphones, so that a device tree can name them in
+ * audio-routing and so they appear as inputs rather than as bare codec pins.
+ * Which physical microphone is on which of the codec's analogue inputs is a
+ * board matter and belongs in the device tree; these are just the endpoints
+ * it can refer to.
+ */
+static const struct snd_soc_dapm_widget msm8974_dapm_widgets[] = {
+	SND_SOC_DAPM_MIC("Handset Mic", NULL),
+	SND_SOC_DAPM_MIC("Secondary Mic", NULL),
+	SND_SOC_DAPM_MIC("Headset Mic", NULL),
+	SND_SOC_DAPM_MIC("Digital Mic", NULL),
+};
+
 static int msm8974_snd_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -329,6 +343,9 @@ static int msm8974_snd_platform_probe(struct platform_device *pdev)
 	card->owner = THIS_MODULE;
 	dev_set_drvdata(dev, card);
 	snd_soc_card_set_drvdata(card, data);
+
+	card->dapm_widgets = msm8974_dapm_widgets;
+	card->num_dapm_widgets = ARRAY_SIZE(msm8974_dapm_widgets);
 
 	ret = qcom_snd_parse_of(card);
 	if (ret)
