@@ -37,13 +37,13 @@ the others listed there.
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
 | 3D | Partly working | Adreno 330 through freedreno runs the compositor. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer. Needs a VRAM carveout. `docs/known-problems.md` |
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer. The light sensor binds but reads 0 lux; proximity responds but is uncalibrated |
-| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. The earpiece is the top TFA9890. Headphones and microphones are on a WCD9320 codec on SLIMbus: a 4.18-era out-of-tree driver has been forward-ported to 6.16 and the codec now enumerates, probes and prepares its SLIMbus stream, but the ADSP refuses to start the SLIMbus port, so there is no headphone or microphone audio yet. `drivers/audio/wcd9320/`, `docs/remaining-hardware.md` |
+| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. The earpiece is the top TFA9890. Headphones and microphones are on a WCD9320 codec on SLIMbus, driven by a forward-port of z3ntu's 5.11 driver. The playback path runs end to end and the headphone amplifiers respond to the signal; the codec's 9.6 MHz master clock, which it had been missing, comes from the PM8941 divider and PMIC GPIO 15. Microphones, jack detection and a UCM profile are not done. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/`, `docs/remaining-hardware.md` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
 | Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. `modem/` |
-| Mobile data | Not tested | The modem loads its firmware and then stalls during initialisation, so this cannot be tried yet. `docs/modem.md` |
-| SMS | Not tested | Needs the modem |
-| Calls | Not tested | Needs the modem. Calls and Chats are installed |
+| Mobile data | Not tested | The modem starts, reports its IMEI, searches for a network and appears in ModemManager. There is no SIM in the test unit, so data has not been tried. `modem/`, `docs/modem.md` |
+| SMS | Not tested | The modem is up; no SIM in the test unit |
+| Calls | Not tested | The modem is up; no SIM in the test unit. Calls and Chats are installed |
 | USB-OTG | Not tested | The USB controller is in OTG mode and the PM8941 ID detection is present; host mode has not been tried |
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
 | CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |

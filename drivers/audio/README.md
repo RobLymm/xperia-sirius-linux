@@ -1,7 +1,8 @@
 # Audio on the Xperia Z2
 
-Speakers work. Headphones, earpiece and microphones do not, and need a codec
-driver that does not exist yet.
+Speakers, the earpiece and headphone playback all work. Microphones do not:
+they are on the same codec as the headphones and still need its capture path
+brought up.
 
 ## The working path
 
@@ -187,13 +188,18 @@ MI2S, the same as the loudspeakers, and already works.
   tree for this is `devicetree/qcom-msm8974pro-sony-xperia-sirius-codec.dts`.
 - *Codec.* No mainline WCD9320/Taiko driver exists (v6.16 has wcd9335,
   wcd934x, wcd937x/938x/939x, msm8916-wcd, and the shared `wcd-mbhc-v2` /
-  `wcd-clsh-v2`, but no 9320/9310/9330). The out-of-tree one written for this
-  phone by Craig Tatlor (msm8974-mainline `old-4.18.0/qcom-audio-wip`) has
-  been forward-ported to 6.16 and lives in `drivers/audio/wcd9320/`.
+  `wcd-clsh-v2`, but no 9320/9310/9330). z3ntu's driver from the
+  `flto-msm8974-5.11` branch of `z3ntu/linux` has been forward-ported to 6.16
+  and lives in `drivers/audio/wcd9320/`.
+- *Master clock.* The codec needs 9.6 MHz on its MCLK pin. That clock is made
+  by a divider inside the PM8941 and leaves the PMIC on PMIC GPIO 15,
+  alternate function 1. Both halves are device tree, and the divider needs
+  `drivers/clk/pmic-clkdiv/`. Leave either out and the codec still answers on
+  SLIMbus, every register write lands, every widget reports itself powered,
+  and nothing comes out of the jack.
 
-The codec side now works: it enumerates on SLIMbus, probes, registers its
-DAIs and controls, and prepares and enables its SLIMbus stream cleanly with
-a correct configuration. The remaining blocker is the ADSP, which refuses
-`AFE_PORT_CMD_DEVICE_START` for `SLIMBUS_0_RX`, so there is still no
-headphone or microphone audio. See `drivers/audio/wcd9320/README.md` for the
-bugs found getting this far and the two open leads on the remaining one.
+Playback now runs end to end: the ADSP starts the SLIMbus port, the whole
+path from `AIF1 PB` to `HPHL`/`HPHR` powers up, and the headphone amplifier
+status registers respond to the signal while a tone plays. Microphones are
+untested and have no device tree links, there is no jack detection, and there
+is no UCM profile for the jack. See `drivers/audio/wcd9320/README.md`.

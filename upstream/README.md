@@ -73,9 +73,9 @@ Deliberately left out, with the reason:
 - **Audio.** Needs the msm8974 ASoC machine driver
   (../drivers/audio/msm8974-sndcard.c) and the q6afe change. Both are
   upstream candidates in their own right; see the submission order below.
-  Headphones additionally need the WCD9320 codec, forward-ported from a
-  4.18-era out-of-tree driver and compiling against 6.16, but not yet
-  booted.
+  Headphones additionally need the WCD9320 codec, forward-ported from
+  z3ntu's 5.11 driver, plus the PM8941 clock divider that feeds the codec
+  its master clock.
 - **GPU.** Works here only with a VRAM carveout on the kernel command line,
   because msm8974 has no GPU IOMMU support. Not a device tree matter alone.
 - **Battery percentage.** Depends on two out-of-tree patches (0005, 0006 in
@@ -131,11 +131,16 @@ can go immediately:
    bindings: every compatible it uses is already documented.
 4. **msm8974 sound card machine driver** to alsa-devel. It gives the Nexus 5
    and the Fairphone 2 the same speaker path, not only the Z2.
-5. **WCD9320 codec driver**, after the machine driver: headphones and
+5. **PM8941 clock divider fix** to linux-arm-msm: one patch making
+   `clk-spmi-pmic-div.c` take its output names from the device tree. Without
+   it the driver cannot be used on msm8974 at all, because the RPM has
+   already claimed the names it generates. See ../drivers/clk/pmic-clkdiv/.
+6. **WCD9320 codec driver**, after the machine driver: headphones and
    microphones for the whole shinano family, and for every other msm8974
-   phone carrying this codec. Compiles against 6.16; not yet booted.
-6. **Panel driver and binding** to dri-devel. See ../panel-variants/ and ../drivers/panel/.
-7. **Display, audio and sensor nodes for the rest of the family** into
+   phone carrying this codec. Playback works on hardware; capture is
+   untested.
+7. **Panel driver and binding** to dri-devel. See ../panel-variants/ and ../drivers/panel/.
+8. **Display, audio and sensor nodes for the rest of the family** into
    shinano-common.dtsi, once the drivers they need are in.
 
 The postmarketOS side is separate and can move immediately: `device-sony-sirius`

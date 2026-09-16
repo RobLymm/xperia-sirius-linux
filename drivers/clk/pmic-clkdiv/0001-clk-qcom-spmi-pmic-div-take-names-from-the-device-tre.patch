@@ -1,0 +1,53 @@
+From: Rob Watson <rob@mediaeden.com>
+Subject: [PATCH] clk: qcom: spmi-pmic-div: take output names from the device tree
+
+The driver names its outputs div_clk1, div_clk2 and div_clk3. On msm8974 the
+RPM clock controller has already registered clocks under those names by the
+time this driver probes, so clk_hw_register() returns -EEXIST and the whole
+controller fails.
+
+That makes the driver unusable on every msm8974 board, which matters because
+the WCD9320 codec on those boards takes its 9.6 MHz master clock from this
+divider: the RPM's div_clk1 is an XO buffer fixed at 19.2 MHz and cannot
+provide it.
+
+Read the names from the standard clock-output-names property when the device
+tree supplies it, and keep the generated names otherwise, so existing device
+trees are unaffected.
+
+Signed-off-by: 
+---
+ drivers/clk/qcom/clk-spmi-pmic-div.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+--- a/drivers/clk/qcom/clk-spmi-pmic-div.c
++++ b/drivers/clk/qcom/clk-spmi-pmic-div.c
+@@ -243,13 +243,26 @@
+ 	cxo_hz = clk_get_rate(cxo);
+ 	clk_put(cxo);
+ 
+-	init.name = name;
+ 	init.parent_data = &parent_data;
+ 	init.num_parents = 1;
+ 	init.ops = &clk_spmi_pmic_div_ops;
+ 
+ 	for (i = 0, clkdiv = cc->clks; i < nclks; i++) {
+-		snprintf(name, sizeof(name), "div_clk%d", i + 1);
++		const char *of_name;
++
++		/*
++		 * Let the device tree name the outputs. Without this every
++		 * instance registers "div_clk1".."div_clkN", which on msm8974
++		 * collides with the RPM's clocks of the same name and makes
++		 * the whole controller fail to probe with -EEXIST.
++		 */
++		if (!of_property_read_string_index(of_node, "clock-output-names",
++						   i, &of_name)) {
++			init.name = of_name;
++		} else {
++			snprintf(name, sizeof(name), "div_clk%d", i + 1);
++			init.name = name;
++		}
+ 
+ 		spin_lock_init(&clkdiv[i].lock);
+ 		clkdiv[i].base = start + i * 0x100;

@@ -57,8 +57,10 @@ of movement to register.
 
 ## Modem
 
-Boots, then stalls during initialisation. See `modem.md`.
+Works. It needs `ta-service` to answer the Sony trim-area requests, or its
+own watchdog kills it after about forty seconds. See `modem.md`.
 
-## Headphones, earpiece and microphones
+## Microphones
 
-No codec driver. See `../drivers/audio/README.md`.
+No capture path yet. Headphone playback works. See
+`../drivers/audio/README.md`.

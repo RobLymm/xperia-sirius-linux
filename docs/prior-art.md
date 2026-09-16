@@ -27,7 +27,9 @@ What it already contains that matters here:
   also declares the panel as `sharp,ls052t3sx02`, which matches none of the six
   variants this device actually ships; see `panel-identification.md`.
 - **A complete WCD9320 codec driver** on `old-4.18.0/qcom-audio-wip`, about
-  7,100 lines across five files. See `remaining-hardware.md`.
+  7,100 lines across five files. A second one, easier to forward-port because
+  it is four years newer, is on `flto-msm8974-5.11` in `z3ntu/linux`; that is
+  the one this project uses. See `../drivers/audio/wcd9320/`.
 - **`qcom-msm8974-5.6.y-sirius-nfc`**, a branch whose single commit adds NFC to
   the Z2. See `nfc.md`.
 - `old-4.18.0/qcom-tfa-audio-wip`, TFA amplifier work, the same amplifiers this

@@ -35,38 +35,26 @@ driver is out of tree and written against a downstream kernel — whether it has
 whether the brcmfmac SDIO card keeps power across suspend and is re-probed on
 resume. Neither has been investigated; neither needs a new driver.
 
-## Headphones, earpiece and microphones — a port, not a rewrite
+## Microphones
 
-**Correction.** This was previously described as needing two drivers written
-from scratch. That was wrong on both counts.
+Headphone playback works. The codec that carries it, a WCD9320 on SLIMbus,
+also carries all three microphones, and that half is untouched: no capture
+links in the device tree, no ADC or decimator paths, no micbias. The earpiece
+is not part of this at all — it is a separate TFA9890 amplifier on MI2S, like
+the loudspeakers.
 
-**SLIMbus needs nothing.** The NGD controller driver in mainline was
-originally developed and tested on msm8974 with the wcd9320. msm8974 works
-with the existing `qcom,slim-ngd-v1.5.0` compatible — the
-`msm8974-mainline/linux` tree uses exactly that. The whole of the SoC-specific
-data in that driver is `{ .offset = 0x1000, .size = 0x1000 }`, shared by both
-existing entries.
+Nothing here needs a new driver. The pieces are:
 
-**A WCD9320 driver exists**, out of tree, in `msm8974-mainline/linux` on
-branch `old-4.18.0/qcom-audio-wip`:
+- Capture links for `SLIMBUS_0_TX` in the codec device tree, alongside the
+  playback link that is already there.
+- The codec's ADC, decimator and micbias paths, which the driver already
+  contains but which nothing has exercised.
+- Sony's stock tree supplies the micbias and routing configuration: which
+  physical microphone is on which AMIC, and which bias each one uses.
 
-    sound/soc/codecs/wcd9320.c            3376 lines
-    sound/soc/codecs/wcd9320-registers.h  1677 lines
-    sound/soc/codecs/wcd9320-regmap.c     1445 lines
-    sound/soc/codecs/wcd9320-slim.c        384 lines
-    sound/soc/codecs/wcd9320.h             194 lines
-
-So the work is a forward-port from 4.18 to current, not authorship. The main
-obstacle is ASoC API churn: the `snd_soc_codec` to `snd_soc_component`
-conversion landed immediately after 4.18, so every callback signature in that
-driver is from the older API. That is mechanical but extensive.
-
-After the port: a DT node for the Taiko on the SLIMbus controller at
-`fe12f000` (Sony's tree has it as `qcom,taiko-slim-pgd` with the elemental
-address `00 00 a0 00 17 02`), then DAI links added to the machine driver in
-`../drivers/audio/`.
-
-Sony's stock tree supplies the micbias and routing configuration.
+Jack detection is a separate gap. The codec's MBHC hardware is not driven,
+and the driver's `set_jack` only stores the pointer. It needs the interrupt
+block, which in turn needs `CONFIG_REGMAP_IRQ`.
 
 ## Camera — the ISP is nearly solved, the sensors are not
 
@@ -99,10 +87,7 @@ WCNSS; that driver is for other msm8974 phones.
 ## Order worth doing them in
 
 1. **NFC** — a node and a flash.
-2. **Modem** — try lk2nd, then the Z2's own ADSP firmware.
-3. **Suspend** — investigate two drivers.
-4. **Headphones** — forward-port an existing 7,000-line driver.
-5. **Camera** — forward-port existing msm8974 camss and CCI work, then
+2. **Suspend** — investigate two drivers.
+3. **Microphones** — capture links and the codec's ADC paths.
+4. **Camera** — forward-port existing msm8974 camss and CCI work, then
    identify and drive the two sensors.
-6. **FM** — plug in headphones and sweep for stations with
-   `../tools/bcm-fm.sh`, then find the audio route.

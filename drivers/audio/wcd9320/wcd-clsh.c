@@ -1,755 +1,236 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+// Copyright (c) 2017-2018, Linaro Limited
+
 #include <linux/slab.h>
 #include <sound/soc.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
-#include "wcd9335.h"
+#include "wcd9320.h"
 #include "wcd-clsh.h"
 
-/* Class-H registers for codecs from and above WCD9335 */
-#define WCD9XXX_A_CDC_RX0_RX_PATH_CFG0			(0xB42)
-#define WCD9XXX_A_CDC_RX1_RX_PATH_CFG0			(0xB56)
-#define WCD9XXX_A_CDC_RX2_RX_PATH_CFG0			(0xB6A)
-#define WCD9XXX_A_CDC_CLSH_K1_MSB			(0xC08)
-#define WCD9XXX_A_CDC_CLSH_K1_LSB			(0xC09)
-#define WCD9XXX_A_ANA_RX_SUPPLIES			(0x608)
-#define WCD9XXX_A_ANA_HPH				(0x609)
-#define WCD9XXX_A_CDC_CLSH_CRC				(0xC01)
-#define WCD9XXX_FLYBACK_EN				(0x6A4)
-#define WCD9XXX_RX_BIAS_FLYB_BUFF			(0x6C7)
-#define WCD9XXX_HPH_L_EN				(0x6D3)
-#define WCD9XXX_HPH_R_EN				(0x6D6)
-#define WCD9XXX_HPH_REFBUFF_UHQA_CTL			(0x6DD)
-#define WCD9XXX_CLASSH_CTRL_VCL_2                       (0x69B)
-#define WCD9XXX_CDC_CLSH_HPH_V_PA			(0xC04)
-#define WCD9XXX_CDC_RX0_RX_PATH_SEC0			(0xB49)
-#define WCD9XXX_CDC_RX1_RX_PATH_CTL			(0xB55)
-#define WCD9XXX_CDC_RX2_RX_PATH_CTL			(0xB69)
-#define WCD9XXX_CDC_CLK_RST_CTRL_MCLK_CONTROL		(0xD41)
-#define WCD9XXX_CLASSH_CTRL_CCL_1                       (0x69C)
-
-#define WCD_USLEEP_RANGE 50
-
-enum {
-	DAC_GAIN_0DB = 0,
-	DAC_GAIN_0P2DB,
-	DAC_GAIN_0P4DB,
-	DAC_GAIN_0P6DB,
-	DAC_GAIN_0P8DB,
-	DAC_GAIN_M0P2DB,
-	DAC_GAIN_M0P4DB,
-	DAC_GAIN_M0P6DB,
+struct wcd_clsh_ctrl {
+	int state;
+	int clsh_users;
+	int cp_users;
+	struct snd_soc_component *comp;
 };
 
-enum {
-	VREF_FILT_R_0OHM = 0,
-	VREF_FILT_R_25KOHM,
-	VREF_FILT_R_50KOHM,
-	VREF_FILT_R_100KOHM,
+struct wcd9xxx_reg_mask_val {
+	u16 reg;
+	u8 mask;
+	u8 val;
 };
 
-enum {
-	DELTA_I_0MA,
-	DELTA_I_10MA,
-	DELTA_I_20MA,
-	DELTA_I_30MA,
-	DELTA_I_40MA,
-	DELTA_I_50MA,
-};
-
-static void (*clsh_state_fp[NUM_CLSH_STATES_V2])(struct snd_soc_component *,
-					      struct wcd_clsh_cdc_data *,
-					      u8 req_state, bool en, int mode);
-
-static bool is_native_44_1_active(struct snd_soc_component *component)
+static inline void wcd_clsh_common_init(struct snd_soc_component *comp, bool hph)
 {
-	bool native_active = false;
-	u8 native_clk, rx1_rate, rx2_rate;
-
-	native_clk = snd_soc_component_read(component,
-				 WCD9XXX_CDC_CLK_RST_CTRL_MCLK_CONTROL);
-	rx1_rate = snd_soc_component_read(component, WCD9XXX_CDC_RX1_RX_PATH_CTL);
-	rx2_rate = snd_soc_component_read(component, WCD9XXX_CDC_RX2_RX_PATH_CTL);
-
-	if ((native_clk & 0x2) &&
-	    ((rx1_rate & 0x0F) == 0x9 || (rx2_rate & 0x0F) == 0x9))
-		native_active = true;
-
-	return native_active;
-}
-
-static inline void wcd_enable_clsh_block(struct snd_soc_component *component,
-		      struct wcd_clsh_cdc_data *clsh_d, bool enable)
-{
-	if ((enable && ++clsh_d->clsh_users == 1) ||
-	    (!enable && --clsh_d->clsh_users == 0))
-		snd_soc_component_update_bits(component, WCD9XXX_A_CDC_CLSH_CRC, 0x01,
-				    (u8) enable);
-	if (clsh_d->clsh_users < 0)
-		clsh_d->clsh_users = 0;
-}
-
-static inline bool wcd_clsh_enable_status(struct snd_soc_component *component)
-{
-	return snd_soc_component_read(component, WCD9XXX_A_CDC_CLSH_CRC) & 0x01;
-}
-
-static inline int wcd_clsh_get_int_mode(struct wcd_clsh_cdc_data *clsh_d,
-					int clsh_state)
-{
-	int mode;
-
-	if ((clsh_state != WCD_CLSH_STATE_EAR) &&
-	    (clsh_state != WCD_CLSH_STATE_HPHL) &&
-	    (clsh_state != WCD_CLSH_STATE_HPHR) &&
-	    (clsh_state != WCD_CLSH_STATE_LO))
-		mode = CLS_NONE;
-	else
-		mode = clsh_d->interpolator_modes[ffs(clsh_state)];
-
-	return mode;
-}
-
-static inline void wcd_clsh_set_int_mode(struct wcd_clsh_cdc_data *clsh_d,
-					int clsh_state, int mode)
-{
-	if ((clsh_state != WCD_CLSH_STATE_EAR) &&
-	    (clsh_state != WCD_CLSH_STATE_HPHL) &&
-	    (clsh_state != WCD_CLSH_STATE_HPHR) &&
-	    (clsh_state != WCD_CLSH_STATE_LO))
-		return;
-
-	clsh_d->interpolator_modes[ffs(clsh_state)] = mode;
-}
-
-static inline void wcd_clsh_set_buck_mode(struct snd_soc_component *component,
-					  int mode)
-{
-	if (mode == CLS_H_HIFI)
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    0x08, 0x08); /* set to HIFI */
-	else
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    0x08, 0x00); /* set to default */
-}
-
-static inline void wcd_clsh_set_flyback_mode(struct snd_soc_component *component,
-					     int mode)
-{
-	if (mode == CLS_H_HIFI)
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    0x04, 0x04); /* set to HIFI */
-	else
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    0x04, 0x00); /* set to Default */
-}
-
-static void wcd_clsh_buck_ctrl(struct snd_soc_component *component,
-			       struct wcd_clsh_cdc_data *clsh_d,
-			       int mode,
-			       bool enable)
-{
-	/* enable/disable buck */
-	if ((enable && (++clsh_d->buck_users == 1)) ||
-	   (!enable && (--clsh_d->buck_users == 0)))
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    (1 << 7), (enable << 7));
-	/*
-	 * 500us sleep is required after buck enable/disable
-	 * as per HW requirement
-	 */
-	usleep_range(500, 500 + WCD_USLEEP_RANGE);
-}
-
-static void wcd_clsh_flyback_ctrl(struct snd_soc_component *component,
-				  struct wcd_clsh_cdc_data *clsh_d,
-				  int mode,
-				  bool enable)
-{
-	u8 vneg[] = {0x00, 0x40};
-
-	/* enable/disable flyback */
-	if ((enable && (++clsh_d->flyback_users == 1)) ||
-	   (!enable && (--clsh_d->flyback_users == 0))) {
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    (1 << 6), (enable << 6));
-		/* 100usec delay is needed as per HW requirement */
-		usleep_range(100, 110);
-
-		if (enable && (WCD9335_IS_1_1(clsh_d->codec_version))) {
-			wcd_clsh_set_flyback_mode(component, CLS_H_HIFI);
-			snd_soc_component_update_bits(component, WCD9XXX_FLYBACK_EN,
-					    0x60, 0x40);
-			snd_soc_component_update_bits(component, WCD9XXX_FLYBACK_EN,
-					    0x10, 0x10);
-			vneg[0] = snd_soc_component_read(component,
-					       WCD9XXX_A_ANA_RX_SUPPLIES);
-			vneg[0] &= ~(0x40);
-			vneg[1] = vneg[0] | 0x40;
-
-			
-			snd_soc_component_write(component, WCD9XXX_A_ANA_RX_SUPPLIES, vneg[0]);
-
-			snd_soc_component_write(component, WCD9XXX_A_ANA_RX_SUPPLIES, vneg[1]);
-			/* 500usec delay is needed as per HW requirement */
-			usleep_range(500, 510);
-			snd_soc_component_update_bits(component, WCD9XXX_FLYBACK_EN,
-					    0x10, 0x00);
-			wcd_clsh_set_flyback_mode(component, mode);
-		}
-
-	}
-	/*
-	 * 500us sleep is required after flyback enable/disable
-	 * as per HW requirement
-	 */
-	usleep_range(500, 500 + WCD_USLEEP_RANGE);
-}
-
-static void wcd_clsh_set_gain_path(struct snd_soc_component *component,
-				   struct wcd_clsh_cdc_data *clsh_d,
-				   int mode)
-{
-	u8 val = 0;
-
-	if (!WCD9335_IS_2_0(clsh_d->codec_version))
-		return;
-
-	switch (mode) {
-	case CLS_H_NORMAL:
-	case CLS_AB:
-		val = 0x00;
-		break;
-	case CLS_H_HIFI:
-		val = 0x02;
-		break;
-	case CLS_H_LP:
-		val = 0x01;
-		break;
-	};
-	snd_soc_component_update_bits(component, WCD9XXX_HPH_L_EN, 0xC0, (val << 6));
-	snd_soc_component_update_bits(component, WCD9XXX_HPH_R_EN, 0xC0, (val << 6));
-}
-
-static void wcd_clsh_set_hph_mode(struct snd_soc_component *component,
-				  int mode)
-{
-	u8 val = 0, gain = 0, res_val = VREF_FILT_R_0OHM;
-	u8 ipeak = DELTA_I_50MA;
-
-//	struct wcd9xxx *wcd9xxx = dev_get_drvdata(component->dev->parent);
-
-	switch (mode) {
-	case CLS_H_NORMAL:
-		res_val = VREF_FILT_R_50KOHM;
-		val = 0x00;
-		gain = DAC_GAIN_0DB;
-		ipeak = DELTA_I_50MA;
-		break;
-	case CLS_AB:
-		val = 0x00;
-		gain = DAC_GAIN_0DB;
-		ipeak = DELTA_I_50MA;
-		break;
-	case CLS_H_HIFI:
-		val = 0x08;
-		gain = DAC_GAIN_M0P2DB;
-		ipeak = DELTA_I_50MA;
-		break;
-	case CLS_H_LP:
-		val = 0x04;
-		ipeak = DELTA_I_30MA;
-		break;
+	const struct wcd9xxx_reg_mask_val reg_set[] = {
+		// wcd9xxx_cfg_clsh_buck
+		{WCD9320_BUCK_CTRL_CCL_4, 0x0B, 0x00},
+		{WCD9320_BUCK_CTRL_CCL_1, 0xF0, 0x50},
+		{WCD9320_BUCK_CTRL_CCL_3, 0x03, 0x00},
+		{WCD9320_BUCK_CTRL_CCL_3, 0x0B, 0x00},
+		// wcd9xxx_cfg_clsh_param_common
+		{WCD9320_CDC_CLSH_BUCK_NCP_VARS, 0x3 << 0, 0},
+		{WCD9320_CDC_CLSH_BUCK_NCP_VARS, 0x3 << 2, 1 << 2},
+		{WCD9320_CDC_CLSH_BUCK_NCP_VARS, (0x1 << 4), 0},
+		{WCD9320_CDC_CLSH_B2_CTL, (0x3 << 0), 0x01},
+		{WCD9320_CDC_CLSH_B2_CTL, (0x3 << 2), (0x01 << 2)},
+		{WCD9320_CDC_CLSH_B2_CTL, (0xf << 4), (0x03 << 4)},
+		{WCD9320_CDC_CLSH_B3_CTL, (0xf << 4), (0x03 << 4)},
+		{WCD9320_CDC_CLSH_B3_CTL, (0xf << 0), (0x0B)},
+		{WCD9320_CDC_CLSH_B1_CTL, (0x1 << 5), (0x01 << 5)},
+		{WCD9320_CDC_CLSH_B1_CTL, (0x1 << 1), (0x01 << 1)},
 	};
 
-	snd_soc_component_update_bits(component, WCD9XXX_A_ANA_HPH, 0x0C, val);
-//	if (TASHA_IS_2_0(wcd9xxx->version)) {
-		snd_soc_component_update_bits(component, WCD9XXX_CLASSH_CTRL_VCL_2,
-				    0x30, (res_val << 4));
-		if (mode != CLS_H_LP)
-			snd_soc_component_update_bits(component, WCD9XXX_HPH_REFBUFF_UHQA_CTL,
-					    0x07, gain);
-		snd_soc_component_update_bits(component, WCD9XXX_CLASSH_CTRL_CCL_1,
-				    0xF0, (ipeak << 4));
-//	}
-}
+	const struct wcd9xxx_reg_mask_val reg_ear[] = {
+		{WCD9320_CDC_CLSH_B1_CTL, (0x1 << 7), 0},
+		{WCD9320_CDC_CLSH_V_PA_HD_EAR, (0x3f << 0), 0x0D},
+		{WCD9320_CDC_CLSH_V_PA_MIN_EAR, (0x3f << 0), 0x3A},
 
-static void wcd_clsh_set_flyback_current(struct snd_soc_component *component, int mode)
-{
-//	struct wcd9xxx *wcd9xxx = dev_get_drvdata(component->dev->parent);
+		/* Under assumption that EAR load is 10.7ohm */
+		{WCD9320_CDC_CLSH_IDLE_EAR_THSD, (0x3f << 0), 0x26},
+		{WCD9320_CDC_CLSH_FCLKONLY_EAR_THSD, (0x3f << 0), 0x2C},
+		{WCD9320_CDC_CLSH_I_PA_FACT_EAR_L, 0xff, 0xA9},
+		{WCD9320_CDC_CLSH_I_PA_FACT_EAR_U, 0xff, 0x07},
+		{WCD9320_CDC_CLSH_K_ADDR, (0x1 << 7), 0},
+		{WCD9320_CDC_CLSH_K_ADDR, (0xf << 0), 0x08},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x1b},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x2d},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x36},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x37},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+	};
 
-//	if (!TASHA_IS_2_0(wcd9xxx->version))
-//		return;
+	const struct wcd9xxx_reg_mask_val reg_hph[] = {
+		{WCD9320_CDC_CLSH_B1_CTL, (0x1 << 6), 0},
+		{WCD9320_CDC_CLSH_V_PA_HD_HPH, 0x3f, 0x0D},
+		{WCD9320_CDC_CLSH_V_PA_MIN_HPH, 0x3f, 0x1D},
 
-	snd_soc_component_update_bits(component, WCD9XXX_RX_BIAS_FLYB_BUFF, 0x0F, 0x0A);
-	snd_soc_component_update_bits(component, WCD9XXX_RX_BIAS_FLYB_BUFF, 0xF0, 0xA0);
-	/* Sleep needed to avoid click and pop as per HW requirement */
-	usleep_range(100, 110);
-}
+		/* Under assumption that HPH load is 16ohm per channel */
+		{WCD9320_CDC_CLSH_IDLE_HPH_THSD, 0x3f, 0x13},
+		{WCD9320_CDC_CLSH_FCLKONLY_HPH_THSD, 0x1f, 0x19},
+		{WCD9320_CDC_CLSH_I_PA_FACT_HPH_L, 0xff, 0x97},
+		{WCD9320_CDC_CLSH_I_PA_FACT_HPH_U, 0xff, 0x05},
+		{WCD9320_CDC_CLSH_K_ADDR, (0x1 << 7), 0},
+		{WCD9320_CDC_CLSH_K_ADDR, 0x0f, 0},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0xAE},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x01},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x1C},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x24},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x25},
+		{WCD9320_CDC_CLSH_K_DATA, 0xff, 0x00},
+	};
 
-static void wcd_clsh_set_buck_regulator_mode(struct snd_soc_component *component,
-					     int mode)
-{
-	if (mode == CLS_AB)
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    0x02, 0x02);
-	else
-		snd_soc_component_update_bits(component, WCD9XXX_A_ANA_RX_SUPPLIES,
-				    0x02, 0x00);
-}
+	int i;
+	for (i = 0; i < ARRAY_SIZE(reg_set); i++)
+		snd_soc_component_update_bits(comp, reg_set[i].reg, reg_set[i].mask, reg_set[i].val);
 
-static void wcd_clsh_state_lo(struct snd_soc_component *component,
-			      struct wcd_clsh_cdc_data *clsh_d,
-			      u8 req_state, bool is_enable, int mode)
-{
-	if (mode != CLS_AB) {
-		dev_err(component->dev, "%s: LO cannot be in this mode: %d\n",
-			__func__, mode);
-		return;
+	if (hph) {
+		for (i = 0; i < ARRAY_SIZE(reg_hph); i++)
+			snd_soc_component_update_bits(comp, reg_hph[i].reg, reg_hph[i].mask, reg_hph[i].val);
+	} else {
+		for (i = 0; i < ARRAY_SIZE(reg_ear); i++)
+			snd_soc_component_update_bits(comp, reg_ear[i].reg, reg_ear[i].mask, reg_ear[i].val);
 	}
+}
+
+static inline void wcd_enable_clsh_block(struct wcd_clsh_ctrl *ctrl,
+					 bool enable)
+{
+	struct snd_soc_component *comp = ctrl->comp;
+
+	if ((enable && ++ctrl->clsh_users == 1) ||
+	    (!enable && --ctrl->clsh_users == 0))
+		snd_soc_component_update_bits(comp, WCD9320_CDC_CLSH_B1_CTL, 0x01, enable);
+	if (ctrl->clsh_users < 0)
+		ctrl->clsh_users = 0;
+}
+
+static inline void wcd_enable_chargepump(struct wcd_clsh_ctrl *ctrl, bool enable)
+{
+	struct snd_soc_component *comp = ctrl->comp;
+
+	if ((enable && ++ctrl->cp_users == 1) ||
+	    (!enable && --ctrl->cp_users == 0))
+		snd_soc_component_update_bits(comp, WCD9320_CDC_CLK_OTHR_CTL, 0x01, enable);
+	if (ctrl->cp_users < 0)
+		ctrl->cp_users = 0;
+}
+
+#define BUCK_VREF_2V 0xFF
+#define BUCK_VREF_1P8V 0xE6
+#define BUCK_SETTLE_TIME_US 50
+
+static void wcd_enable_buck_mode(struct snd_soc_component *comp)
+{
+	int i;
+	const struct wcd9xxx_reg_mask_val reg_set[] = {
+		{WCD9320_BUCK_MODE_5, 0x02, 0x03},
+		{WCD9320_BUCK_MODE_4, 0xFF, BUCK_VREF_2V},
+		{WCD9320_BUCK_MODE_1, 0x04, 0x04},
+		{WCD9320_BUCK_MODE_1, 0x08, 0x00},
+		{WCD9320_BUCK_MODE_3, 0x04, 0x00},
+		{WCD9320_BUCK_MODE_3, 0x08, 0x00},
+		{WCD9320_BUCK_MODE_1, 0x80, 0x80},
+	};
+
+	for (i = 0; i < ARRAY_SIZE(reg_set); i++)
+		snd_soc_component_update_bits(comp, reg_set[i].reg, reg_set[i].mask, reg_set[i].val);
+
+	usleep_range(BUCK_SETTLE_TIME_US, BUCK_SETTLE_TIME_US);
+}
+
+#define NCP_FCLK_LEVEL_8 0x08
+#define NCP_FCLK_LEVEL_5 0x05
+#define NCP_SETTLE_TIME_US 50
+
+static void wcd_set_fclk_enable_ncp(struct snd_soc_component *comp)
+{
+	int i;
+	const struct wcd9xxx_reg_mask_val reg_set[] = {
+		{WCD9320_NCP_STATIC, 0x20, 0x20},
+		{WCD9320_NCP_EN, 0x01, 0x01},
+	};
+	snd_soc_component_update_bits(comp, WCD9320_NCP_STATIC,
+						0x010, 0x00);
+	snd_soc_component_update_bits(comp, WCD9320_NCP_STATIC,
+						0x0F, NCP_FCLK_LEVEL_8);
+	for (i = 0; i < ARRAY_SIZE(reg_set); i++)
+		snd_soc_component_update_bits(comp, reg_set[i].reg,
+					reg_set[i].mask, reg_set[i].val);
+
+	usleep_range(NCP_SETTLE_TIME_US, NCP_SETTLE_TIME_US);
+}
+
+static void wcd_clsh_state_lo(struct wcd_clsh_ctrl *ctrl, int req_state, bool is_enable)
+{
+	printk("%s unimplemented\n", __FUNCTION__);
+}
+
+static void wcd_clsh_state_hph_r(struct wcd_clsh_ctrl *ctrl, int req_state, bool is_enable)
+{
+	struct snd_soc_component *comp = ctrl->comp;
 
 	if (is_enable) {
-		wcd_clsh_set_buck_regulator_mode(component, mode);
-		wcd_clsh_set_buck_mode(component, mode);
-		wcd_clsh_set_flyback_mode(component, mode);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_set_flyback_current(component, mode);
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, true);
+		wcd_clsh_common_init(comp, true);
+		wcd_enable_clsh_block(ctrl, true);
+		wcd_enable_chargepump(ctrl, true);
+		snd_soc_component_update_bits(comp, WCD9320_CDC_CLSH_B1_CTL, 0x4, 0x4); // 8 for left
+		wcd_enable_buck_mode(comp);
+		wcd_set_fclk_enable_ncp(comp);
 	} else {
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, false);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, false);
-		wcd_clsh_set_flyback_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_regulator_mode(component, CLS_H_NORMAL);
+		snd_soc_component_update_bits(comp, WCD9320_CDC_CLSH_B1_CTL, 0x4, 0x0);
 	}
 }
 
-static void wcd_clsh_state_hph_ear(struct snd_soc_component *component,
-				   struct wcd_clsh_cdc_data *clsh_d,
-				   u8 req_state, bool is_enable, int mode)
+static void wcd_clsh_state_hph_l(struct wcd_clsh_ctrl *ctrl, int req_state, bool is_enable)
 {
-	int hph_mode = 0;
+	struct snd_soc_component *comp = ctrl->comp;
 
 	if (is_enable) {
-		if (req_state == WCD_CLSH_STATE_EAR) {
-			/* If HPH is running in CLS-AB when
-			 * EAR comes, let it continue to run
-			 * in Class-AB, no need to enable Class-H
-			 * for EAR.
-			 */
-			if (clsh_d->state & WCD_CLSH_STATE_HPHL)
-				hph_mode = wcd_clsh_get_int_mode(clsh_d,
-						WCD_CLSH_STATE_HPHL);
-			else if (clsh_d->state & WCD_CLSH_STATE_HPHR)
-				hph_mode = wcd_clsh_get_int_mode(clsh_d,
-						WCD_CLSH_STATE_HPHR);
-			if (hph_mode != CLS_AB && !is_native_44_1_active(component))
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-						0x40, 0x40);
-		}
-
-		if (is_native_44_1_active(component)) {
-			snd_soc_component_write(component, WCD9XXX_CDC_CLSH_HPH_V_PA, 0x39);
-			snd_soc_component_update_bits(component,
-					WCD9XXX_CDC_RX0_RX_PATH_SEC0,
-					0x03, 0x00);
-			if ((req_state == WCD_CLSH_STATE_HPHL) ||
-			    (req_state == WCD_CLSH_STATE_HPHR))
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-						0x40, 0x00);
-		}
-
-		if (req_state == WCD_CLSH_STATE_HPHL)
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					    0x40, 0x40);
-		if (req_state == WCD_CLSH_STATE_HPHR)
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					    0x40, 0x40);
-		if ((req_state == WCD_CLSH_STATE_HPHL) ||
-		    (req_state == WCD_CLSH_STATE_HPHR)) {
-			wcd_clsh_set_gain_path(component, clsh_d, mode);
-			wcd_clsh_set_flyback_mode(component, mode);
-			wcd_clsh_set_buck_mode(component, mode);
-		}
+		wcd_clsh_common_init(comp, true);
+		wcd_enable_clsh_block(ctrl, true);
+		wcd_enable_chargepump(ctrl, true);
+		snd_soc_component_update_bits(comp, WCD9320_CDC_CLSH_B1_CTL, 0x8, 0x8); // 8 for left
+		wcd_enable_buck_mode(comp);
+		wcd_set_fclk_enable_ncp(comp);
 	} else {
-		if (req_state == WCD_CLSH_STATE_EAR) {
-			/*
-			 * If EAR goes away, disable EAR Channel Enable
-			 * if HPH running in Class-H otherwise
-			 * and if HPH requested mode is CLS_AB then
-			 * no need to disable EAR channel enable bit.
-			 */
-		       if (wcd_clsh_enable_status(component))
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-						0x40, 0x00);
-		}
-
-		if (is_native_44_1_active(component)) {
-			snd_soc_component_write(component, WCD9XXX_CDC_CLSH_HPH_V_PA, 0x1C);
-			snd_soc_component_update_bits(component,
-					WCD9XXX_CDC_RX0_RX_PATH_SEC0,
-					0x03, 0x01);
-			if (((clsh_d->state & WCD_CLSH_STATE_HPH_ST)
-				  != WCD_CLSH_STATE_HPH_ST) &&
-			    ((req_state == WCD_CLSH_STATE_HPHL) ||
-			     (req_state == WCD_CLSH_STATE_HPHR)))
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-						0x40, 0x40);
-		}
-
-		if (req_state == WCD_CLSH_STATE_HPHL)
-			snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					0x40, 0x00);
-		if (req_state == WCD_CLSH_STATE_HPHR)
-			snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					0x40, 0x00);
-		if ((req_state & WCD_CLSH_STATE_HPH_ST) &&
-		    !wcd_clsh_enable_status(component)) {
-			/* If Class-H is not enabled when HPH is turned
-			 * off, enable it as EAR is in progress
-			 */
-			wcd_enable_clsh_block(component, clsh_d, true);
-			snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-					0x40, 0x40);
-			wcd_clsh_set_flyback_mode(component, CLS_H_NORMAL);
-			wcd_clsh_set_buck_mode(component, CLS_H_NORMAL);
-		}
+		snd_soc_component_update_bits(comp, WCD9320_CDC_CLSH_B1_CTL, 0x8, 0x0);
 	}
 }
 
-static void wcd_clsh_state_ear_lo(struct snd_soc_component *component,
-				  struct wcd_clsh_cdc_data *clsh_d,
-				  u8 req_state, bool is_enable, int mode)
+static void wcd_clsh_state_ear(struct wcd_clsh_ctrl *ctrl, int req_state, bool is_enable)
 {
-	if (is_enable && (req_state == WCD_CLSH_STATE_LO)) {
-		wcd_clsh_set_buck_regulator_mode(component, CLS_AB);
-	} else {
-		if (req_state == WCD_CLSH_STATE_EAR)
-			goto end;
-
-		/* LO powerdown.
-		 * If EAR Class-H is already enabled, just
-		 * turn on regulator other enable Class-H
-		 * configuration
-		 */
-		if (wcd_clsh_enable_status(component)) {
-			wcd_clsh_set_buck_regulator_mode(component,
-					CLS_H_NORMAL);
-			goto end;
-		}
-		wcd_enable_clsh_block(component, clsh_d, true);
-		snd_soc_component_update_bits(component,
-				WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-				0x40, 0x40);
-		wcd_clsh_set_buck_regulator_mode(component,
-				CLS_H_NORMAL);
-		wcd_clsh_set_buck_mode(component, mode);
-		wcd_clsh_set_flyback_mode(component, mode);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, true);
-	}
-end:
-	return;
+	printk("%s unimplemented\n", __FUNCTION__);
 }
 
-static void wcd_clsh_state_hph_lo(struct snd_soc_component *component,
-				  struct wcd_clsh_cdc_data *clsh_d,
-				  u8 req_state, bool is_enable, int mode)
+static int _wcd_clsh_ctrl_set_state(struct wcd_clsh_ctrl *ctrl, int req_state, bool is_enable)
 {
-	int hph_mode = 0;
-
-	if (is_enable) {
-		/*
-		 * If requested state is LO, put regulator
-		 * in class-AB or if requested state is HPH,
-		 * which means LO is already enabled, keep
-		 * the regulator config the same at class-AB
-		 * and just set the power modes for flyback
-		 * and buck.
-		 */
-		if (req_state == WCD_CLSH_STATE_LO)
-			wcd_clsh_set_buck_regulator_mode(component, CLS_AB);
-		else {
-			if (!wcd_clsh_enable_status(component)) {
-				wcd_enable_clsh_block(component, clsh_d, true);
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_CLSH_K1_MSB,
-						0x0F, 0x00);
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_CLSH_K1_LSB,
-						0xFF, 0xC0);
-				wcd_clsh_set_flyback_mode(component, mode);
-				wcd_clsh_set_buck_mode(component, mode);
-				wcd_clsh_set_hph_mode(component, mode);
-				wcd_clsh_set_gain_path(component, clsh_d, mode);
-			} else {
-				dev_dbg(component->dev, "%s:clsh is already enabled\n",
-					__func__);
-			}
-			if (req_state == WCD_CLSH_STATE_HPHL)
-				snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					0x40, 0x40);
-			if (req_state == WCD_CLSH_STATE_HPHR)
-				snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					0x40, 0x40);
-		}
-	} else {
-		if ((req_state == WCD_CLSH_STATE_HPHL) ||
-		    (req_state == WCD_CLSH_STATE_HPHR)) {
-			if (req_state == WCD_CLSH_STATE_HPHL)
-				snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					    0x40, 0x00);
-			if (req_state == WCD_CLSH_STATE_HPHR)
-				snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					    0x40, 0x00);
-			/*
-			 * If HPH is powering down first, then disable clsh,
-			 * set the buck/flyback mode to default and keep the
-			 * regulator at Class-AB
-			 */
-			if ((clsh_d->state & WCD_CLSH_STATE_HPH_ST)
-				!= WCD_CLSH_STATE_HPH_ST) {
-				wcd_enable_clsh_block(component, clsh_d, false);
-				wcd_clsh_set_flyback_mode(component, CLS_H_NORMAL);
-				wcd_clsh_set_buck_mode(component, CLS_H_NORMAL);
-			}
-		} else {
-			/* LO powerdown.
-			 * If HPH mode also is CLS-AB, no need
-			 * to turn-on class-H, otherwise enable
-			 * Class-H configuration.
-			 */
-			if (clsh_d->state & WCD_CLSH_STATE_HPHL)
-				hph_mode = wcd_clsh_get_int_mode(clsh_d,
-						WCD_CLSH_STATE_HPHL);
-			else if (clsh_d->state & WCD_CLSH_STATE_HPHR)
-				hph_mode = wcd_clsh_get_int_mode(clsh_d,
-						WCD_CLSH_STATE_HPHR);
-
-			if ((hph_mode == CLS_AB) ||
-			   (hph_mode == CLS_NONE))
-				goto end;
-
-			/*
-			 * If Class-H is already enabled (HPH ON and then
-			 * LO ON), no need to turn on again, just set the
-			 * regulator mode.
-			 */
-			if (wcd_clsh_enable_status(component)) {
-				wcd_clsh_set_buck_regulator_mode(component,
-								 hph_mode);
-				goto end;
-			} else {
-				dev_dbg(component->dev, "%s: clsh is not enabled\n",
-					__func__);
-			}
-
-			wcd_enable_clsh_block(component, clsh_d, true);
-			snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_CLSH_K1_MSB,
-					0x0F, 0x00);
-			snd_soc_component_update_bits(component,
-					WCD9XXX_A_CDC_CLSH_K1_LSB,
-					0xFF, 0xC0);
-			wcd_clsh_set_buck_regulator_mode(component,
-							 hph_mode);
-			if (clsh_d->state & WCD_CLSH_STATE_HPHL)
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-						0x40, 0x40);
-			if (clsh_d->state & WCD_CLSH_STATE_HPHR)
-				snd_soc_component_update_bits(component,
-						WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-						0x40, 0x40);
-			wcd_clsh_set_hph_mode(component, hph_mode);
-		}
-	}
-end:
-	return;
-}
-
-static void wcd_clsh_state_hph_st(struct snd_soc_component *component,
-				  struct wcd_clsh_cdc_data *clsh_d,
-				  u8 req_state, bool is_enable, int mode)
-{
-	if (mode == CLS_AB)
-		return;
-
-	if (is_enable) {
-		if (req_state == WCD_CLSH_STATE_HPHL)
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					    0x40, 0x40);
-		if (req_state == WCD_CLSH_STATE_HPHR)
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					    0x40, 0x40);
-	} else {
-		if (req_state == WCD_CLSH_STATE_HPHL)
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					    0x40, 0x00);
-		if (req_state == WCD_CLSH_STATE_HPHR)
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					    0x40, 0x00);
-	}
-}
-
-static void wcd_clsh_state_hph_r(struct snd_soc_component *component,
-				 struct wcd_clsh_cdc_data *clsh_d,
-				 u8 req_state, bool is_enable, int mode)
-{
-	if (mode == CLS_H_NORMAL) {
-		dev_err(component->dev, "%s: Normal mode not applicable for hph_r\n",
-			__func__);
-		return;
+	switch (req_state) {
+	case WCD_CLSH_STATE_EAR:
+		wcd_clsh_state_ear(ctrl, req_state, is_enable);
+		break;
+	case WCD_CLSH_STATE_HPHL:
+		wcd_clsh_state_hph_l(ctrl, req_state, is_enable);
+		break;
+	case WCD_CLSH_STATE_HPHR:
+		wcd_clsh_state_hph_r(ctrl, req_state, is_enable);
+		break;
+		break;
+	case WCD_CLSH_STATE_LO:
+		wcd_clsh_state_lo(ctrl, req_state, is_enable);
+		break;
+	default:
+		break;
 	}
 
-	if (is_enable) {
-		if (mode != CLS_AB) {
-			wcd_enable_clsh_block(component, clsh_d, true);
-			/*
-			 * These K1 values depend on the Headphone Impedance
-			 * For now it is assumed to be 16 ohm
-			 */
-			snd_soc_component_update_bits(component, WCD9XXX_A_CDC_CLSH_K1_MSB,
-					    0x0F, 0x00);
-			snd_soc_component_update_bits(component, WCD9XXX_A_CDC_CLSH_K1_LSB,
-					    0xFF, 0xC0);
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					    0x40, 0x40);
-		}
-		wcd_clsh_set_buck_regulator_mode(component, mode);
-		wcd_clsh_set_flyback_mode(component, mode);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_set_flyback_current(component, mode);
-		wcd_clsh_set_buck_mode(component, mode);
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_set_hph_mode(component, mode);
-		wcd_clsh_set_gain_path(component, clsh_d, mode);
-	} else {
-		wcd_clsh_set_hph_mode(component, CLS_H_NORMAL);
-
-		if (mode != CLS_AB) {
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX2_RX_PATH_CFG0,
-					    0x40, 0x00);
-			wcd_enable_clsh_block(component, clsh_d, false);
-		}
-		/* buck and flyback set to default mode and disable */
-		wcd_clsh_buck_ctrl(component, clsh_d, CLS_H_NORMAL, false);
-		wcd_clsh_flyback_ctrl(component, clsh_d, CLS_H_NORMAL, false);
-		wcd_clsh_set_flyback_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_regulator_mode(component, CLS_H_NORMAL);
-	}
-}
-
-static void wcd_clsh_state_hph_l(struct snd_soc_component *component,
-				 struct wcd_clsh_cdc_data *clsh_d,
-				 u8 req_state, bool is_enable, int mode)
-{
-	if (mode == CLS_H_NORMAL) {
-		dev_err(component->dev, "%s: Normal mode not applicable for hph_l\n",
-			__func__);
-		return;
-	}
-
-	if (is_enable) {
-		if (mode != CLS_AB) {
-			wcd_enable_clsh_block(component, clsh_d, true);
-			/*
-			 * These K1 values depend on the Headphone Impedance
-			 * For now it is assumed to be 16 ohm
-			 */
-			snd_soc_component_update_bits(component, WCD9XXX_A_CDC_CLSH_K1_MSB,
-					    0x0F, 0x00);
-			snd_soc_component_update_bits(component, WCD9XXX_A_CDC_CLSH_K1_LSB,
-					    0xFF, 0xC0);
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					    0x40, 0x40);
-		}
-		wcd_clsh_set_buck_regulator_mode(component, mode);
-		wcd_clsh_set_flyback_mode(component, mode);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_set_flyback_current(component, mode);
-		wcd_clsh_set_buck_mode(component, mode);
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_set_hph_mode(component, mode);
-		wcd_clsh_set_gain_path(component, clsh_d, mode);
-	} else {
-		wcd_clsh_set_hph_mode(component, CLS_H_NORMAL);
-
-		if (mode != CLS_AB) {
-			snd_soc_component_update_bits(component,
-					    WCD9XXX_A_CDC_RX1_RX_PATH_CFG0,
-					    0x40, 0x00);
-			wcd_enable_clsh_block(component, clsh_d, false);
-		}
-		/* set buck and flyback to Default Mode */
-		wcd_clsh_buck_ctrl(component, clsh_d, CLS_H_NORMAL, false);
-		wcd_clsh_flyback_ctrl(component, clsh_d, CLS_H_NORMAL, false);
-		wcd_clsh_set_flyback_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_regulator_mode(component, CLS_H_NORMAL);
-	}
-}
-
-static void wcd_clsh_state_ear(struct snd_soc_component *component,
-		struct wcd_clsh_cdc_data *clsh_d,
-		u8 req_state, bool is_enable, int mode)
-{
-	if (mode != CLS_H_NORMAL) {
-		dev_err(component->dev, "%s: mode: %d cannot be used for EAR\n",
-			__func__, mode);
-		return;
-	}
-
-	if (is_enable) {
-		wcd_enable_clsh_block(component, clsh_d, true);
-		snd_soc_component_update_bits(component,
-				    WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-				    0x40, 0x40);
-		wcd_clsh_set_buck_mode(component, mode);
-		wcd_clsh_set_flyback_mode(component, mode);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, true);
-		wcd_clsh_set_flyback_current(component, mode);
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, true);
-	} else {
-		snd_soc_component_update_bits(component,
-				    WCD9XXX_A_CDC_RX0_RX_PATH_CFG0,
-				    0x40, 0x00);
-		wcd_enable_clsh_block(component, clsh_d, false);
-		wcd_clsh_buck_ctrl(component, clsh_d, mode, false);
-		wcd_clsh_flyback_ctrl(component, clsh_d, mode, false);
-		wcd_clsh_set_flyback_mode(component, CLS_H_NORMAL);
-		wcd_clsh_set_buck_mode(component, CLS_H_NORMAL);
-	}
-}
-
-static void wcd_clsh_state_err(struct snd_soc_component *component,
-		struct wcd_clsh_cdc_data *clsh_d,
-		u8 req_state, bool is_enable, int mode)
-{
-	char msg[128];
-
-	dev_err(component->dev, "Invalid class H state machine requested\n"); 
-	WARN_ON(1);
+	return 0;
 }
 
 /*
@@ -758,21 +239,14 @@ static void wcd_clsh_state_err(struct snd_soc_component *component,
  * Description:
  * Provides information on valid states of Class H configuration
  */
-static bool wcd_clsh_is_state_valid(u8 state)
+static bool wcd_clsh_is_state_valid(int state)
 {
 	switch (state) {
 	case WCD_CLSH_STATE_IDLE:
 	case WCD_CLSH_STATE_EAR:
 	case WCD_CLSH_STATE_HPHL:
 	case WCD_CLSH_STATE_HPHR:
-	case WCD_CLSH_STATE_HPH_ST:
 	case WCD_CLSH_STATE_LO:
-	case WCD_CLSH_STATE_HPHL_EAR:
-	case WCD_CLSH_STATE_HPHR_EAR:
-	case WCD_CLSH_STATE_HPH_ST_EAR:
-	case WCD_CLSH_STATE_HPHL_LO:
-	case WCD_CLSH_STATE_HPHR_LO:
-	case WCD_CLSH_STATE_HPH_ST_LO:
 		return true;
 	default:
 		return false;
@@ -781,90 +255,60 @@ static bool wcd_clsh_is_state_valid(u8 state)
 
 /*
  * Function: wcd_clsh_fsm
- * Params: component, cdc_clsh_d, req_state, req_type, clsh_event
+ * Params: ctrl, req_state, req_type, clsh_event
  * Description:
  * This function handles PRE DAC and POST DAC conditions of different devices
  * and updates class H configuration of different combination of devices
- * based on validity of their states. cdc_clsh_d will contain current
+ * based on validity of their states. ctrl will contain current
  * class h state information
  */
-void wcd_clsh_fsm(struct snd_soc_component *component,
-		struct wcd_clsh_cdc_data *cdc_clsh_d,
-		u8 clsh_event, u8 req_state,
-		int int_mode)
+int wcd_clsh_ctrl_set_state(struct wcd_clsh_ctrl *ctrl,
+			    enum wcd_clsh_event clsh_event, int nstate)
 {
-	u8 old_state, new_state;
-	char msg0[128], msg1[128];
+	struct snd_soc_component *comp = ctrl->comp;
+
+	if (nstate == ctrl->state)
+		return 0;
+
+	if (!wcd_clsh_is_state_valid(nstate)) {
+		dev_err(comp->dev, "Class-H not a valid new state:\n");
+		return -EINVAL;
+	}
 
 	switch (clsh_event) {
 	case WCD_CLSH_EVENT_PRE_DAC:
-		old_state = cdc_clsh_d->state;
-		new_state = old_state | req_state;
-
-		if (!wcd_clsh_is_state_valid(new_state)) {
-			dev_err(component->dev, "Class-H not a valid new state:\n");
-			return;
-		}
-		if (new_state == old_state) {
-			dev_err(component->dev, "Class-H already in requested state\n");
-			return;
-		}
-		cdc_clsh_d->state = new_state;
-		wcd_clsh_set_int_mode(cdc_clsh_d, req_state, int_mode);
-		(*clsh_state_fp[new_state]) (component, cdc_clsh_d, req_state,
-					     CLSH_REQ_ENABLE, int_mode);
+		_wcd_clsh_ctrl_set_state(ctrl, nstate, true);
 		break;
 	case WCD_CLSH_EVENT_POST_PA:
-		old_state = cdc_clsh_d->state;
-		new_state = old_state & (~req_state);
-		if (new_state < NUM_CLSH_STATES_V2) {
-			if (!wcd_clsh_is_state_valid(old_state)) {
-				dev_err(component->dev, "Invalid old state\n");
-				return;
-			}
-			if (new_state == old_state) {
-				dev_err(component->dev,"Class-H already in requested state\n");
-				return;
-			}
-			(*clsh_state_fp[old_state]) (component, cdc_clsh_d,
-					req_state, CLSH_REQ_DISABLE,
-					int_mode);
-			cdc_clsh_d->state = new_state;
-			wcd_clsh_set_int_mode(cdc_clsh_d, req_state, CLS_NONE);
-		}
+		_wcd_clsh_ctrl_set_state(ctrl, nstate, false);
 		break;
-	};
+	}
+
+	ctrl->state = nstate;
+	return 0;
 }
 
-int wcd_clsh_get_clsh_state(struct wcd_clsh_cdc_data *clsh)
+int wcd_clsh_ctrl_get_state(struct wcd_clsh_ctrl *ctrl)
 {
-	return clsh->state;
+	return ctrl->state;
 }
 
-void wcd_clsh_init(struct wcd_clsh_cdc_data *clsh)
+struct wcd_clsh_ctrl *wcd_clsh_ctrl_alloc(struct snd_soc_component *comp,
+					  int version)
 {
-	clsh->state = WCD_CLSH_STATE_IDLE;
-	clsh_state_fp[WCD_CLSH_STATE_IDLE] = wcd_clsh_state_err;
-	clsh_state_fp[WCD_CLSH_STATE_EAR] = wcd_clsh_state_ear;
-	clsh_state_fp[WCD_CLSH_STATE_HPHL] =wcd_clsh_state_hph_l;
-	clsh_state_fp[WCD_CLSH_STATE_HPHR] = wcd_clsh_state_hph_r;
-	clsh_state_fp[WCD_CLSH_STATE_HPH_ST] = wcd_clsh_state_hph_st;
-	clsh_state_fp[WCD_CLSH_STATE_LO] = wcd_clsh_state_lo;
-	clsh_state_fp[WCD_CLSH_STATE_HPHL_EAR] = wcd_clsh_state_hph_ear;
-	clsh_state_fp[WCD_CLSH_STATE_HPHR_EAR] = wcd_clsh_state_hph_ear;
-	clsh_state_fp[WCD_CLSH_STATE_HPH_ST_EAR] = wcd_clsh_state_hph_ear;
-	clsh_state_fp[WCD_CLSH_STATE_HPHL_LO] = wcd_clsh_state_hph_lo;
-	clsh_state_fp[WCD_CLSH_STATE_HPHR_LO] = wcd_clsh_state_hph_lo;
-	clsh_state_fp[WCD_CLSH_STATE_HPH_ST_LO] = wcd_clsh_state_hph_lo;
-	clsh_state_fp[WCD_CLSH_STATE_EAR_LO] = wcd_clsh_state_ear_lo;
+	struct wcd_clsh_ctrl *ctrl;
 
-	/* Set interpolaotr modes to NONE */
-	wcd_clsh_set_int_mode(clsh, WCD_CLSH_STATE_EAR, CLS_NONE);
-	wcd_clsh_set_int_mode(clsh, WCD_CLSH_STATE_HPHL, CLS_NONE);
-	wcd_clsh_set_int_mode(clsh, WCD_CLSH_STATE_HPHR, CLS_NONE);
-	wcd_clsh_set_int_mode(clsh, WCD_CLSH_STATE_LO, CLS_NONE);
+	ctrl = kzalloc(sizeof(*ctrl), GFP_KERNEL);
+	if (!ctrl)
+		return ERR_PTR(-ENOMEM);
 
-	clsh->flyback_users = 0;
-	clsh->buck_users = 0;
-	clsh->clsh_users = 0;
+	ctrl->state = WCD_CLSH_STATE_IDLE;
+	ctrl->comp = comp;
+
+	return ctrl;
+}
+
+void wcd_clsh_ctrl_free(struct wcd_clsh_ctrl *ctrl)
+{
+	kfree(ctrl);
 }
