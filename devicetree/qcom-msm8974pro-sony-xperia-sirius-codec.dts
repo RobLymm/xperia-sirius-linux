@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Sony Xperia Z2 (sirius): WCD9320 (Taiko) codec on SLIMbus, experimental.
+ *
+ * Headphones and the microphones sit on the WCD9320; the earpiece is the top
+ * TFA9890, so the codec is only needed for those. The codec hangs off the
+ * LPASS SLIMbus NGD controller (fe12f000) whose data moves through the
+ * SLIMbus BAM (fe104000, run by the ADSP: "controlled-remotely"). Mainline's
+ * qcom-ngd-ctrl drives it with the same compatible as msm8996; the ADSP
+ * firmware exposes the SLIMbus QMI service (769) it needs.
+ *
+ * Node layout follows the out-of-tree wcd9320 driver (msm8974-mainline
+ * old-4.18.0/qcom-audio-wip, written on a Z2; forward-ported in
+ * drivers-wip/wcd9320): the SLIMbus device node carries the pads, supplies
+ * and clock, and its child "wcd" is the codec platform device. Supplies,
+ * reset (gpio63), interrupt (gpio72) and the 9.6 MHz MCLK on PM8941 GPIO15
+ * (DIV_CLK1, function 1) are Sony's downstream values.
+ *
+ * Builds on the FM variant so one image carries both.
+ */
+#include "qcom-msm8974pro-sony-xperia-sirius-fmaudio.dts"
+
+&{/soc} {
+	slimbam: dma-controller@fe104000 {
+		compatible = "qcom,bam-v1.4.0";
+		reg = <0xfe104000 0x20000>;
+		interrupts = <GIC_SPI 164 IRQ_TYPE_LEVEL_HIGH>;
+		#dma-cells = <1>;
+		qcom,ee = <1>;
+		qcom,num-ees = <2>;
+		num-channels = <31>;
+		qcom,controlled-remotely;
+	};
+
+	slim_msm: slim@fe12f000 {
+		compatible = "qcom,slim-ngd-v1.5.0";
+		reg = <0xfe12f000 0x35000>;
+		interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>;
+		dmas = <&slimbam 3>, <&slimbam 4>;
+		dma-names = "rx", "tx";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ngd@1 {
+			reg = <1>;
+			#address-cells = <2>;
+			#size-cells = <0>;
+
+			/* interface device: manufacturer 0x217, product 0xa0 */
+			wcd_ifd: ifd@0,0 {
+				compatible = "slim217,a0";
+				reg = <0 0>;
+			};
+
+			wcd_slim: codec@1,0 {
+				compatible = "slim217,a0";
+				reg = <1 0>;
+
+				/*
+				 * The 9.6 MHz master clock. On msm8974 the PM8941
+				 * divider outputs are managed by the RPM and
+				 * exposed as div_clk1/2 by rpmcc, so rpmcc is the
+				 * provider; the PMIC clkdiv driver cannot be used
+				 * here because it registers its clocks under the
+				 * same names and collides with the RPM's.
+				 * PM8941 GPIO 15 in function 1 routes it out.
+				 */
+				clocks = <&rpmcc RPM_SMD_DIV_CLK1>;
+				clock-names = "clk";
+				pinctrl-names = "default";
+				pinctrl-0 = <&codec_mclk_default>, <&codec_int_default>;
+
+				qcom,gpio-int2 = <&tlmm 72 GPIO_ACTIVE_HIGH>;
+				qcom,reset-gpio = <&tlmm 63 GPIO_ACTIVE_HIGH>;
+				qcom,clk-gpio = <&pm8941_gpios 15 GPIO_ACTIVE_HIGH>;
+				qcom,codec-clk-rate = <9600000>;
+
+				vdd-buck-supply = <&pm8941_s2>;
+				vdd-tx-h-supply = <&pm8941_s3>;
+				vdd-rx-h-supply = <&pm8941_s3>;
+				vddpx-1-supply = <&pm8941_s3>;
+				vdd-a-1p2v-supply = <&pm8941_l1>;
+				vddcx-1-supply = <&pm8941_l1>;
+				vddcx-2-supply = <&pm8941_l1>;
+
+				ifd = <&wcd_ifd>;
+
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				wcd9320: wcd {
+					compatible = "qcom,wcd9320";
+					#sound-dai-cells = <1>;
+				};
+			};
+		};
+	};
+};
+
+&pm8941_gpios {
+	codec_mclk_default: codec-mclk-state {
+		pins = "gpio15";
+		function = "func1";
+		output-high;
+		power-source = <PM8941_GPIO_S3>;
+	};
+};
+
+&tlmm {
+	codec_int_default: codec-int-state {
+		pins = "gpio72";
+		function = "gpio";
+		bias-pull-up;
+		drive-strength = <2>;
+	};
+};
+
+&sound {
+	slim-playback-dai-link {
+		link-name = "Slimbus Playback";
+
+		cpu {
+			sound-dai = <&q6afedai SLIMBUS_0_RX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&wcd9320 0>;
+		};
+	};
+};

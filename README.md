@@ -37,7 +37,7 @@ the others listed there.
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
 | 3D | Partly working | Adreno 330 through freedreno runs the compositor. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer. Needs a VRAM carveout. `docs/known-problems.md` |
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer. The light sensor binds but reads 0 lux; proximity responds but is uncalibrated |
-| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. Headphones and microphones need the WCD9320 codec: a 4.18-era out-of-tree driver has been forward-ported to 6.16 and compiles, with a device tree and boot image ready; not yet booted. The earpiece is the top TFA9890. `drivers/audio/`, `docs/remaining-hardware.md` |
+| Audio | Partly working | Both loudspeakers work: QDSP6 to Quaternary MI2S to two TFA9890 amplifiers. The earpiece is the top TFA9890. Headphones and microphones are on a WCD9320 codec on SLIMbus: a 4.18-era out-of-tree driver has been forward-ported to 6.16 and the codec now enumerates, probes and prepares its SLIMbus stream, but the ADSP refuses to start the SLIMbus port, so there is no headphone or microphone audio yet. `drivers/audio/wcd9320/`, `docs/remaining-hardware.md` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
 | Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. `modem/` |

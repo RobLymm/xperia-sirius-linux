@@ -174,38 +174,26 @@ do not behave the way a phone's should. This is userspace only, it needs no
 kernel work, and `alsa-ucm-conf` accepts contributions on GitHub. It is
 probably the highest value per hour of anything left in this directory.
 
-**Headphones, earpiece and microphones.** These are on a WCD9320 (Taiko)
-codec on SLIMbus, whose master is inside the ADSP (an NGD satellite on the
-apps side). Two pieces are needed, and both have prior art on the same SoC —
-this is a forward-port, not a from-scratch driver.
+**Headphones and microphones.** These are on a WCD9320 (Taiko) codec on
+SLIMbus, whose master is inside the ADSP (an NGD satellite on the apps
+side). The earpiece is not affected — it is a separate TFA9890 amplifier on
+MI2S, the same as the loudspeakers, and already works.
 
 - *SLIMbus.* Mainline's `qcom-ngd-ctrl` already handles NGD v1.5.0 (msm8996)
   and v2.1.0 (sdm845); the Fairphone 2 / Nexus 5 work declares the msm8974
   `slim@fe12f000` node as `compatible = "qcom,slim-ngd-v1.5.0"` with a
   `slimbam` BAM, reusing the v1.5.0 path — so this is device tree plus
-  `CONFIG_SLIM_QCOM_NGD_CTRL`, not a controller rewrite. There is no slim node
-  in mainline `qcom-msm8974.dtsi` yet. NGD probe depends on the ADSP framer
-  and a PDR lookup for `avs/audio`; the Z2's q6afe/q6asm already run, so APR is
-  up, which is the favourable half.
+  `CONFIG_SLIM_QCOM_NGD_CTRL`, not a controller rewrite. The Z2's device
+  tree for this is `devicetree/qcom-msm8974pro-sony-xperia-sirius-codec.dts`.
 - *Codec.* No mainline WCD9320/Taiko driver exists (v6.16 has wcd9335,
   wcd934x, wcd937x/938x/939x, msm8916-wcd, and the shared `wcd-mbhc-v2` /
-  `wcd-clsh-v2`, but no 9320/9310/9330). An out-of-tree one does:
-  **flto's `wcd9320.c` (+ `wcd9320_b.c`, `.h`)**, GPL-2.0, ~4-5k lines, a
-  `module_slim_driver` using `regmap_init_slimbus` and the shared
-  `wcd_clsh_ctrl`, with `MCLK 9.6 MHz` matching Sony's tree. It lives on
-  `z3ntu/linux:flto-msm8974-5.11` and `msm8974-mainline/linux:flto-msm8974`,
-  was never submitted upstream, and is not yet rebased past 5.11. On the
-  Fairphone 2 (same SoC) z3ntu records headphone audio as "kind of works".
+  `wcd-clsh-v2`, but no 9320/9310/9330). The out-of-tree one written for this
+  phone by Craig Tatlor (msm8974-mainline `old-4.18.0/qcom-audio-wip`) has
+  been forward-ported to 6.16 and lives in `drivers/audio/wcd9320/`.
 
-Path for the Z2: pull flto's `wcd9320.*` and rebase onto 6.16 (compare
-mainline `wcd9335.c`, 5169 lines, for the ASoC/regmap drift); add the DT
-(slim NGD node, `taiko_ifd`, `codec@1` `slim217,0a0`, micbias, mclk); wire the
-Taiko SLIMbus RX/TX q6afe DAIs and headphone/AMIC DAPM as a second path beside
-the Quaternary MI2S → TFA9890 speaker route; enable `SND_SOC_WCD9320`,
-`SLIM_QCOM_NGD_CTRL`. Debug NGD probe / ADSP PDR first — if the framer never
-starts, nothing downstream enumerates. Moderate scale, and de-risked by flto
-having proven the whole chain on the FP2.
-
-Sources: `github.com/z3ntu/linux/tree/flto-msm8974-5.11`,
-`github.com/msm8974-mainline/linux/tree/flto-msm8974`,
-`github.com/z3ntu/linux-mainline-files/blob/main/fp2-hw-support.md`.
+The codec side now works: it enumerates on SLIMbus, probes, registers its
+DAIs and controls, and prepares and enables its SLIMbus stream cleanly with
+a correct configuration. The remaining blocker is the ADSP, which refuses
+`AFE_PORT_CMD_DEVICE_START` for `SLIMBUS_0_RX`, so there is still no
+headphone or microphone audio. See `drivers/audio/wcd9320/README.md` for the
+bugs found getting this far and the two open leads on the remaining one.
