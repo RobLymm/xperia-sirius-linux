@@ -22,8 +22,18 @@
  * prepare fails with -EINVAL. Only set_channel_map used to fill this in, and
  * it writes a different array from the one the DAI walks.
  */
+/*
+ * The SLIMbus shared channel number is not the codec's port number. Sony's
+ * downstream msm8974 machine driver hands the ADSP 144..156 for RX and
+ * 128..143 for TX, while the codec's own slave ports are 16.. for RX and 0..
+ * for TX: the two differ by a fixed offset. Passing the port number instead
+ * gives the ADSP channels it does not own, and it then refuses to start the
+ * port (AFE_PORT_CMD_DEVICE_START returns error 1).
+ */
+#define WCD_SLIM_CH_BASE	128
+
 #define WCD_SLIM_CH(xport, xshift) \
-	{.port = xport, .shift = xshift, .ch_num = xport}
+	{.port = xport, .shift = xshift, .ch_num = (xport) + WCD_SLIM_CH_BASE}
 
 struct wcd_slim_ch {
 	u32 sph;

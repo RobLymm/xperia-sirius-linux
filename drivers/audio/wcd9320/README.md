@@ -111,3 +111,44 @@ them explain it:
 - SLIMbus bandwidth reservation is stubbed out in this port:
   `wcd9320_codec_slim_reserve_bw()` returns 0 unconditionally, with a FIXME
   where the downstream driver votes a clock gear instead.
+
+## Update: the ADSP blocker is fixed; the remaining gap is class-H
+
+**Fifth bug: the SLIMbus shared channel numbers were wrong.** The codec's
+slave *port* numbers and the SLIMbus *shared channel* numbers the ADSP is
+told to use are different things. Sony's downstream msm8974 machine driver
+hands the ADSP 144..156 for RX and 128..143 for TX, while the codec's own
+ports are 16.. for RX and 0.. for TX: a fixed offset of 128. An earlier fix
+here set ch_num equal to the port number, so the ADSP was given channels it
+does not own and refused to start the port, returning error 1 from
+AFE_PORT_CMD_DEVICE_START. With `ch_num = port + 128` the ADSP accepts the
+port, and audio runs end to end: every DAPM widget from `AIF1 PB` through
+`SLIM RX1 MUX`, `RX1 MIX1 INP1`, `RX1 CHAIN`, `CLASS_H_DSM MUX` and
+`HPHL DAC` to `HPHL`/`HPHR` and `HEADPHONE` powers up, and the PCM runs.
+
+**What still does not work: there is no sound in the headphones**, because
+the headphone amplifier has no supply. `wcd-clsh.c` states in its own header
+comment that its registers are "for codecs from and above WCD9335", and it
+hard-codes addresses such as 0x608 (`ANA_RX_SUPPLIES`), 0x6A4 (`FLYBACK_EN`)
+and 0xB56 (`CDC_RX1_RX_PATH_CFG0`). This codec predates that generation: its
+register map ends at 0x3fc, and its supply block is elsewhere entirely —
+`BUCK_MODE_1..5` at 0x181, `NCP_EN` at 0x192, `NCP_STATIC` at 0x194 and the
+class-H block at 0x320..0x324. So every class-H write fails with -EIO
+(visible as "ASoC error (-5) ... for register: [0x00000b56]") and the negative
+charge pump, whose power-on default in `NCP_EN` is off, is never enabled. The
+amplifier is switched on into a dead rail.
+
+Fixing this means porting the class-H and supply sequence for this codec.
+The reference is Sony's `sound/soc/codecs/wcd9xxx-common.c`, which drives
+exactly those 0x18x/0x32x registers. Until then the codec will power up its
+whole path and produce silence.
+
+Still outstanding after that, before headphones and microphones are usable:
+the codec's 9.6 MHz master clock needs verifying (the RPM `div_clk1` it takes
+reads 19.2 MHz), the capture side has no device tree links or testing at all
+(microphones need SLIMBUS_0_TX, the ADC paths and micbias), there is no jack
+detection (the MBHC hardware is not driven; `set_jack` only stores the
+pointer), and nothing maps any of it into a UCM profile for the audio server.
+
+This driver also still carries its debug prints and a `skip_slim_stream`
+module parameter used while diagnosing the ADSP refusal.
