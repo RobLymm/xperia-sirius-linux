@@ -10,14 +10,15 @@ There is no WCD9320 driver in mainline. This is z3ntu's driver from the
 
 ## State
 
-The codec enumerates, probes, registers its DAIs and controls, and the whole
-playback path powers up: `AIF1 PB` through `SLIM RX1/RX2 MUX`,
-`RX1/RX2 MIX1`, `CLASS_H_DSM MUX` and `HPHL/HPHR DAC` to `HPHL`/`HPHR`. The
-charge pump, the class-H block and both headphone amplifiers switch on, and
-the amplifier status registers respond to the signal while a tone plays.
+Headphone playback works and has been heard. The codec enumerates, probes,
+registers its DAIs and controls, and the whole playback path powers up:
+`AIF1 PB` through `SLIM RX1/RX2 MUX`, `RX1/RX2 MIX1`, `CLASS_H_DSM MUX` and
+`HPHL/HPHR DAC` to `HPHL`/`HPHR`.
 
-Capture is untested. There are no microphone links in the device tree yet, no
-jack detection, and no UCM profile.
+Capture does not work at all. Every callback on the capture side is still the
+`unimplemented` stub this branch shipped: microphone bias, the ADCs, the
+decimators, the digital microphones, the SLIMbus TX ports and the `LDO_H`
+supply. There is also no jack detection.
 
 ## What the port to 6.16 needed
 
@@ -33,6 +34,30 @@ jack detection, and no UCM profile.
   control list walked off the end of the text array and oopsed in `strlen`,
   which hung anything that enumerated mixer controls. They now use
   `ARRAY_SIZE()`.
+
+## Three crashes fixed here
+
+All three were reached by `alsactl` restoring the mixer at boot, which meant
+the phone oopsed on every cold boot, wedged `alsa-restore.service`, and with
+`sound.target` waiting on it never finished starting the graphical session.
+
+1. **A mux control deleted itself from a list that had never been
+   initialised.** The channel descriptions are copied from a static template
+   whose list heads are zero, and only `set_channel_map()` initialised them,
+   which does not run until a stream does. Writing a SLIM RX or TX mux before
+   then reached `list_del_init()` on an empty `list_head` and wrote through a
+   NULL pointer. They are now initialised when the component registers.
+
+2. **A mux handler read its widget from the wrong field.**
+   `snd_kcontrol_chip()` on a DAPM control returns that control's
+   `dapm_kcontrol_data`, not a widget list, and the `widget` member of it is
+   only filled in for switches and mixers, not muxes. The decimator handler
+   cast it to a widget list and dereferenced the NULL. It now uses
+   `snd_soc_dapm_kcontrol_widget()`.
+
+3. **A plain control was treated as a DAPM one.** "ANC Function" is a
+   `SOC_ENUM_SINGLE_EXT`, so `snd_soc_dapm_kcontrol_dapm()` does not apply to
+   it. The context now comes from the component.
 
 ## Two fixes carried over from the earlier 4.18 port
 
@@ -71,10 +96,22 @@ Do not substitute the RPM's `div_clk1`. Mainline models it as a crystal
 buffer fixed at 19.2 MHz, so it cannot be set to 9.6, and it does nothing
 about the pin.
 
+## The gain has to be told to come from the gain register
+
+Downstream applies a second register table, `taiko_codec_reg_init_val`, after
+the power-on defaults. This branch never had it, and one pair of entries in it
+is the difference between silence and sound: bit 5 of `RX_HPH_L_GAIN` and
+`RX_HPH_R_GAIN` selects the gain held in the register rather than the one the
+compander drives. With the companders off and that bit clear the amplifiers
+power up, the status registers move, the jack clicks as the amplifier ramps,
+and nothing comes out. The same table sets the wave-generator time to 20 ms,
+which is what stops the amplifier popping when it powers up.
+
 ## Still to do
 
-- Microphones: SLIMBUS_0_TX links in the device tree, the ADC and decimator
-  paths, and micbias.
+- Microphones: six callbacks to port from Sony's driver (`micbias`, `adc`,
+  `dec`, `dmic`, `slimtx`, `ldo_h`), plus SLIMBUS_0_TX links and
+  `audio-routing` in the device tree.
 - Jack detection, which needs regmap-irq or an equivalent, and the MBHC
   hardware driven rather than `set_jack` merely storing the pointer.
 - A UCM profile so the audio server can select the jack.

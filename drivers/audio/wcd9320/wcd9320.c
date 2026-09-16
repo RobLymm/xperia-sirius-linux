@@ -530,19 +530,25 @@ static int wcd9320_put_dec_enum(struct snd_kcontrol *kc,
 
 	val = ucontrol->value.enumerated.item[0];
 
-	// XXX get reg/sel
 	{
 		unsigned decimator;
 
-		struct snd_soc_dapm_widget_list *wlist = snd_kcontrol_chip(kc);
-		struct snd_soc_dapm_widget *w = wlist->widgets[0];
+		/*
+		 * snd_kcontrol_chip() on a DAPM control gives the control's
+		 * dapm_kcontrol_data, not a widget list, and the widget
+		 * member of that is only filled in for switches and mixers.
+		 * For a mux it is NULL, so reading the name through it
+		 * oopsed every time alsactl restored the mixer state, which
+		 * wedged alsa-restore.service and with it the whole boot.
+		 * snd_soc_dapm_kcontrol_widget() is the accessor that
+		 * follows the widget list properly.
+		 */
+		struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_widget(kc);
 
 		if (w->name[4] == ' ')
 			decimator = w->name[3] - '0';
 		else
 			decimator = 10;
-
-		printk("put_dec_num %s decimator=%d\n", w->name, decimator);
 
 		sel = (decimator <= 6 && val == 1) || (decimator >= 6 && (val == 1 || val == 2));
 		reg = WCD9320_CDC_TX1_MUX_CTL + 8 * (decimator - 1);
@@ -648,10 +654,16 @@ static int taiko_get_anc_func(struct snd_kcontrol *kc, struct snd_ctl_elem_value
 
 static int taiko_put_anc_func(struct snd_kcontrol *kc, struct snd_ctl_elem_value *ucontrol)
 {
-	printk("taiko_put_anc_func\n");
-
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kc);
-	struct wcd9320_codec *wcd = dev_get_drvdata(dapm->dev);
+	/*
+	 * "ANC Function" is a SOC_ENUM_SINGLE_EXT control, not a DAPM one, so
+	 * snd_soc_dapm_kcontrol_dapm() does not apply to it and returns
+	 * rubbish. Dereferencing it oopsed the kernel every time alsactl
+	 * restored the mixer state at boot. Take the context from the
+	 * component instead.
+	 */
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kc);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct wcd9320_codec *wcd = dev_get_drvdata(component->dev);
 
 	wcd->anc_func = ucontrol->value.integer.value[0];
 
@@ -3541,6 +3553,84 @@ static const struct snd_soc_dapm_widget wcd9320_dapm_widgets[] = {
 #endif
 };
 
+/*
+ * Downstream's taiko_codec_reg_init_val, applied after the power-on defaults
+ * above. The 5.11 driver never had it, and the first two gain entries are
+ * what stopped the headphones making any sound: bit 5 of the HPH gain
+ * registers selects the gain in the register rather than the one the
+ * compander drives, and with the companders off and the bit clear the
+ * amplifier gets no signal. The wavegen timing further down is what stops
+ * the amplifier popping as it powers up.
+ */
+static const struct wcd9320_reg_mask_val wcd9320_codec_reg_init_val[] = {
+	/* current threshold 350 mA, 4096 wait and run cycles */
+	{WCD9320_RX_HPH_OCP_CTL, 0xE1, 0x61},
+	{WCD9320_RX_COM_OCP_COUNT, 0xFF, 0xFF},
+	{WCD9320_RX_HPH_L_TEST, 0x01, 0x01},
+	{WCD9320_RX_HPH_R_TEST, 0x01, 0x01},
+
+	/* take the gain from the register, not from the compander */
+	{WCD9320_RX_HPH_L_GAIN, 0x20, 0x20},
+	{WCD9320_RX_HPH_R_GAIN, 0x20, 0x20},
+	{WCD9320_RX_LINE_1_GAIN, 0x20, 0x20},
+	{WCD9320_RX_LINE_2_GAIN, 0x20, 0x20},
+	{WCD9320_RX_LINE_3_GAIN, 0x20, 0x20},
+	{WCD9320_RX_LINE_4_GAIN, 0x20, 0x20},
+	{WCD9320_SPKR_DRV_GAIN, 0x04, 0x04},
+
+	/* 16 bit samples on TX1 to TX6 */
+	{WCD9320_CDC_CONN_TX_SB_B1_CTL, 0x30, 0x20},
+	{WCD9320_CDC_CONN_TX_SB_B2_CTL, 0x30, 0x20},
+	{WCD9320_CDC_CONN_TX_SB_B3_CTL, 0x30, 0x20},
+	{WCD9320_CDC_CONN_TX_SB_B4_CTL, 0x30, 0x20},
+	{WCD9320_CDC_CONN_TX_SB_B5_CTL, 0x30, 0x20},
+	{WCD9320_CDC_CONN_TX_SB_B6_CTL, 0x30, 0x20},
+
+	/* 16 bit samples on TX7 to TX10 */
+	{WCD9320_CDC_CONN_TX_SB_B7_CTL, 0x60, 0x40},
+	{WCD9320_CDC_CONN_TX_SB_B8_CTL, 0x60, 0x40},
+	{WCD9320_CDC_CONN_TX_SB_B9_CTL, 0x60, 0x40},
+	{WCD9320_CDC_CONN_TX_SB_B10_CTL, 0x60, 0x40},
+
+	/* high pass filter on the TX paths */
+	{WCD9320_CDC_TX1_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX2_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX3_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX4_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX5_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX6_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX7_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX8_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX9_MUX_CTL, 0x8, 0x0},
+	{WCD9320_CDC_TX10_MUX_CTL, 0x8, 0x0},
+
+	/* compander zone selection */
+	{WCD9320_CDC_COMP0_B4_CTL, 0x3F, 0x37},
+	{WCD9320_CDC_COMP1_B4_CTL, 0x3F, 0x37},
+	{WCD9320_CDC_COMP2_B4_CTL, 0x3F, 0x37},
+	{WCD9320_CDC_COMP0_B5_CTL, 0x7F, 0x7F},
+	{WCD9320_CDC_COMP1_B5_CTL, 0x7F, 0x7F},
+	{WCD9320_CDC_COMP2_B5_CTL, 0x7F, 0x7F},
+
+	/* 20 ms wavegen, chopper off: the compander-off setting */
+	{WCD9320_RX_HPH_CNP_WG_CTL, 0xFF, 0xDB},
+	{WCD9320_RX_HPH_CNP_WG_TIME, 0xFF, 0x58},
+	{WCD9320_RX_HPH_BIAS_WG_OCP, 0xFF, 0x1A},
+	{WCD9320_RX_HPH_CHOP_CTL, 0xFF, 0x24},
+
+	/* longest non-overlap time for the charge pump */
+	{WCD9320_NCP_CLK, 0xFF, 0xFC},
+
+	/* 0.85 V VBG reference */
+	{WCD9320_BIAS_CURR_CTL_2, 0xFF, 0x04},
+
+	/* MAD input microphone is DMIC1 */
+	{WCD9320_CDC_CONN_MAD, 0x0F, 0x08},
+
+	/* DMIC clock drive strength 4 mA */
+	{WCD9320_HDRIVE_OVERRIDE, 0x07, 0x01},
+};
+
 static void wcd9320_codec_init(struct snd_soc_component *component)
 {
 	struct wcd9320_codec *wcd = dev_get_drvdata(component->dev);
@@ -3551,6 +3641,12 @@ static void wcd9320_codec_init(struct snd_soc_component *component)
 					wcd9320_codec_reg_init[i].reg,
 					wcd9320_codec_reg_init[i].mask,
 					wcd9320_codec_reg_init[i].val);
+
+	for (i = 0; i < ARRAY_SIZE(wcd9320_codec_reg_init_val); i++)
+		snd_soc_component_update_bits(component,
+					wcd9320_codec_reg_init_val[i].reg,
+					wcd9320_codec_reg_init_val[i].mask,
+					wcd9320_codec_reg_init_val[i].val);
 }
 
 static int wcd9320_codec_probe(struct snd_soc_component *component)
@@ -3685,6 +3781,20 @@ static int wcd9320_probe(struct wcd9320_codec *wcd)
 
 	memcpy(wcd->rx_chs, wcd9320_rx_chs, sizeof(wcd9320_rx_chs));
 	memcpy(wcd->tx_chs, wcd9320_tx_chs, sizeof(wcd9320_tx_chs));
+
+	/*
+	 * The templates above have zeroed list heads, and set_channel_map()
+	 * only initialises the ones a running stream uses. Anything that
+	 * writes a SLIM RX or TX mux before the first stream then reaches
+	 * list_del_init() on an empty list_head and oopses on a NULL write.
+	 * alsactl does exactly that at boot when it restores the mixer, which
+	 * wedged alsa-restore.service and stopped the phone finishing its
+	 * boot. Initialise them all here instead.
+	 */
+	for (int i = 0; i < ARRAY_SIZE(wcd->rx_chs); i++)
+		INIT_LIST_HEAD(&wcd->rx_chs[i].list);
+	for (int i = 0; i < ARRAY_SIZE(wcd->tx_chs); i++)
+		INIT_LIST_HEAD(&wcd->tx_chs[i].list);
 
 	int ret = devm_snd_soc_register_component(dev, &wcd9320_component_drv,
 					       wcd9320_slim_dais,

@@ -8,10 +8,35 @@ every boot.
 
 ## Installing
 
-    sudo mkdir -p /usr/share/alsa/ucm2/conf.d/msm8974
-    sudo cp "conf.d/msm8974/Sony Xperia Z2.conf" /usr/share/alsa/ucm2/conf.d/msm8974/
-    sudo cp conf.d/msm8974/HiFi.conf              /usr/share/alsa/ucm2/conf.d/msm8974/
-    systemctl --user restart pipewire wireplumber
+    D=/usr/share/alsa/ucm2
+    sudo mkdir -p $D/Qualcomm/sony-sirius $D/conf.d/Sony_Xperia_Z2
+    sudo cp Qualcomm/sony-sirius/*.conf $D/Qualcomm/sony-sirius/
+    sudo ln -sf ../../Qualcomm/sony-sirius/sony-sirius.conf \
+        $D/conf.d/Sony_Xperia_Z2/Sony_Xperia_Z2.conf
+    pulseaudio -k
+
+The profile is looked up by the card's name with spaces replaced by
+underscores, which is why the conf.d directory is `Sony_Xperia_Z2`.
+
+## The headphone jack is not a device here
+
+It works, and the mixer settings that reach it are known, but it is left out
+of this profile on purpose.
+
+Both the speaker and the headphone jack play through the same PCM, `hw:0,0`;
+only the routing controls differ. PulseAudio turns two UCM devices that share
+a PCM into two card profiles rather than two ports on one sink. Switching card
+profile tears the sink down and builds a new one, and the profile being
+switched to only opens if the hardware is already routed the way that profile
+expects: the DSP refuses to start the SLIMbus port when the codec's own muxes
+are not already pointing at it, so the PCM fails with `-EINVAL` and the card
+falls back to a null sink. The result was a phone that lost its audio
+whenever the output was changed.
+
+Two devices as two *ports* would avoid all of it, since a port change does not
+recreate the sink, but PulseAudio only does that for devices that can be
+active at the same time. Until that is worked out, the headphone route is set
+by whatever wants it.
 
 ## Checking that it is found
 
