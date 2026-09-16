@@ -63,7 +63,17 @@ the phone oopsed on every cold boot, wedged `alsa-restore.service`, and with
    `SOC_ENUM_SINGLE_EXT`, so `snd_soc_dapm_kcontrol_dapm()` does not apply to
    it. The context now comes from the component.
 
-A fourth, reached by setting a route rather than by booting: **all seven
+A fourth and a fifth, reached by using the card rather than by booting.
+
+**The SLIMbus stream was never taken down.** The branch wired its stream
+setup to the DAI's `prepare` callback and had nothing on the way out, so the
+DSP was never told the port had finished. After an output had been switched a
+few times the DSP refused to start the port again, and PulseAudio, unable to
+open the PCM, dropped the card to a null sink: the phone lost its audio
+entirely. It now has a real `trigger` that starts the stream on start and
+disables and unprepares it on stop, the same shape as mainline's wcd9335.
+
+**And the fourth: **all seven
 SLIMbus RX muxes shared one stored value.** Writing a mux therefore never
 looked unchanged, so every write added a channel to an interface's channel
 list even when it was already on it, which turned the list into a loop; the

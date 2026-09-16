@@ -820,7 +820,7 @@ static int taiko_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		kfree(dai->sconfig.chs);
-
+		dai->sconfig.chs = NULL;
 		break;
 	}
 
@@ -1462,8 +1462,10 @@ static int taiko_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(comp);
 	struct wcd_slim_codec_dai_data *dai = &wcd->dai[w->shift];
 
-	if (event == SND_SOC_DAPM_POST_PMD)
+	if (event == SND_SOC_DAPM_POST_PMD) {
 		kfree(dai->sconfig.chs);
+		dai->sconfig.chs = NULL;
+	}
 
 	return 0;
 }
@@ -2394,6 +2396,7 @@ static int wcd9320_slim_set_hw_params(struct wcd9320_codec *wcd,
 		cfg->port_mask |= BIT(ch->port);
 	}
 
+	kfree(cfg->chs);
 	cfg->chs = kcalloc(cfg->ch_count, sizeof(unsigned int), GFP_KERNEL);
 	if (!cfg->chs)
 		return -ENOMEM;
@@ -2455,7 +2458,7 @@ err:
 	return ret;
 }
 
-static int wcd9320_trigger(struct snd_pcm_substream *substream, //int cmd,
+static int wcd9320_prepare(struct snd_pcm_substream *substream,
 			   struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
@@ -2493,20 +2496,53 @@ static int wcd9320_trigger(struct snd_pcm_substream *substream, //int cmd,
 	dai_data->sconfig.rate = 48000;
 
 	ret = wcd9320_slim_set_hw_params(wcd, dai_data, substream->stream);
-	if (ret) {
-		dev_err(component->dev, "cannot set SLIMbus parameters: %d\n", ret);
-		return ret;
-	}
-
-	ret = slim_stream_prepare(dai_data->sruntime, &dai_data->sconfig);
-	if (ret) {
-		dev_err(component->dev, "cannot prepare SLIMbus stream: %d\n", ret);
-		return ret;
-	}
-
-	ret = slim_stream_enable(dai_data->sruntime);
 	if (ret)
-		dev_err(component->dev, "cannot enable SLIMbus stream: %d\n", ret);
+		dev_err(component->dev, "cannot set SLIMbus parameters: %d\n", ret);
+
+	return ret;
+}
+
+/*
+ * The stream has to be taken down when the PCM stops, not merely set up when
+ * it starts. Without this the DSP is never told the SLIMbus port has
+ * finished, and the next attempt to start it is refused, which showed up as
+ * the card losing its sink after an output was switched a few times.
+ */
+static int wcd9320_trigger(struct snd_pcm_substream *substream, int cmd,
+			   struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(component);
+	struct wcd_slim_codec_dai_data *dai_data = &wcd->dai[dai->id];
+	int ret = 0;
+
+	if (!dai_data->sruntime)
+		return 0;
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		ret = slim_stream_prepare(dai_data->sruntime, &dai_data->sconfig);
+		if (ret) {
+			dev_err(component->dev,
+				"cannot prepare SLIMbus stream: %d\n", ret);
+			break;
+		}
+		ret = slim_stream_enable(dai_data->sruntime);
+		if (ret)
+			dev_err(component->dev,
+				"cannot enable SLIMbus stream: %d\n", ret);
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		slim_stream_disable(dai_data->sruntime);
+		slim_stream_unprepare(dai_data->sruntime);
+		break;
+	default:
+		break;
+	}
 
 	return ret;
 }
@@ -2595,7 +2631,8 @@ static int wcd9320_get_channel_map(const struct snd_soc_dai *dai,
 
 static struct snd_soc_dai_ops wcd9320_dai_ops = {
 	.hw_params = wcd9320_hw_params,
-	.prepare = wcd9320_trigger,
+	.prepare = wcd9320_prepare,
+	.trigger = wcd9320_trigger,
 	.set_channel_map = wcd9320_set_channel_map,
 	.get_channel_map = wcd9320_get_channel_map,
 };
