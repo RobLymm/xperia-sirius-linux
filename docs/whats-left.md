@@ -56,7 +56,7 @@ drivers.
 ModemManager and carries calls, so the remaining work is a data bearer and
 routing rather than bring-up. Probably hours.
 
-**SMS.** Untested, on a modem that is otherwise up. Probably hours.
+**~~SMS~~** — works. Sending and receiving have both been tested.
 
 **Automatic brightness.** The light sensor binds and its registers read
 correctly but it reports 0 lux, so brightness cannot follow the room.

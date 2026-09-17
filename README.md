@@ -49,7 +49,7 @@ the others listed there.
 | Camera | Not working | msm8974 camera support exists out of tree for the Nexus 5; the two Sony sensors have no drivers. `docs/camera.md` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. `modem/` |
 | Mobile data | Not tested | The modem starts, reports its IMEI, registers on a network and appears in ModemManager, and calls work. Data has not been tried. `modem/`, `docs/modem.md` |
-| SMS | Not tested | The modem is up and registered |
+| SMS | Working | Sending and receiving both tested |
 | Calls | Working except the microphone | A call can be placed and answered, the caller's voice comes out of the phone, and audio generated on the phone reaches the far end through the DSP's in-call playback, with the phone's own loudspeaker silent (`tools/call-say.sh`). What does not work is the microphone: nothing it picks up reaches the far end. Voice audio goes through the DSP, and mainline has no driver for its voice services, so one is ported and adapted here; it needs no calibration data, which was the surprise. The uplink is unsolved, and `drivers/audio/q6voice/README.md` records what has been eliminated. `drivers/audio/q6voice/` |
 | USB-OTG | Not tested | The USB controller is in OTG mode and the PM8941 ID detection is present; host mode has not been tried |
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
