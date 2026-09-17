@@ -157,9 +157,70 @@ device-side processor that resamples between the device ports and the
 vocoder, and downstream runs 48 kHz device ports on this generation too.
 Untested rather than eliminated.
 
-Candidates not yet tried: `VSS_IVOCPROC_CMD_TOPOLOGY_SET_DEV_CHANNELS`, to
-tell the voice processor how many channels each device has, and
-`VSS_IVOCPROC_CMD_SET_DEVICE_V2` after enable.
+**It is not a command this DSP has.**
+`VSS_IVOCPROC_CMD_TOPOLOGY_SET_DEV_CHANNELS`, which would tell the voice
+processor how many channels each device has, does not exist in the command set
+for this vintage: it is absent from the downstream header for this platform.
+`VSS_IVOCPROC_CMD_SET_DEVICE_V2` (`0x000112C6`) does exist and has not been
+tried.
+
+## Why the topology is the most likely answer
+
+Three observations, taken together, point at one explanation:
+
+- `TOPOLOGY_ID_NONE` kills **both** directions.
+- `RX_DEFAULT` carries the downlink with no calibration at all.
+- Every TX topology this DSP offers — `TX_SM_ECNS`, `TX_DM_FLUENCE` — is
+  silent.
+
+`RX_DEFAULT` is a trivial topology. The TX topologies are real
+echo-cancellation and noise-suppression algorithms, and an algorithm with no
+coefficients loaded would output silence while accepting every command. That
+fits all three observations, and it means the remaining work is the
+calibration this file previously dismissed: mapping DSP-visible memory with
+`VSS_IMEMORY_CMD_MAP_PHYSICAL`, parsing the vocproc and vocstrm blocks out of
+Sony's ACDB data, and sending the four registration commands. It is a defined
+project rather than a guess, and it is the honest next step.
+
+The counter-argument, which is why this is "most likely" and not "the
+answer": `msm8916-mainline/linux` runs a call on the same TX topology with
+the same `/* TODO: Implement calibration */`. Either that DSP's firmware
+carries default coefficients and this one's does not, or something else is
+different.
+
+## The route round it, and why it does not work either
+
+Since the microphone records perfectly well on its own, and in-call playback
+demonstrably reaches the far end, the obvious workaround is to capture the
+microphone on the application processor and feed it back in through in-call
+playback. It does not work, for a reason worth recording.
+
+**The microphone's port cannot be captured while a call is up.** Whichever
+claims `SLIMBUS_0_TX` first keeps it. A recording started during a call
+returns the right number of frames of exact zeros; a recording already
+running instead stops the voice session from starting at all. Three things
+were tried to get round that, and none of them was enough:
+
+- Capturing on MultiMedia2 rather than MultiMedia1, so the two directions do
+  not share a front end. Necessary — using one front end for both frees its
+  audio client and breaks playback until a reboot — but not sufficient.
+- Giving the voice processor a different transmit port so it does not hold the
+  microphone's. It will not enable with `PORT_ID_NONE`
+  (`VSS_IVOCPROC_CMD_ENABLE` returns `EFAILED`), but it accepts any real
+  port, so an unused one works: `tx_port=0x4003`.
+- Starting the session on the playback direction alone (`require_both=N`), so
+  opening the voice PCM does not start the microphone's back end at all.
+
+With all three, and **no call in progress**, a voice session and a live
+microphone capture do coexist: the session establishes and a recording made
+alongside it is not zeros. With a real call in progress the recording is
+zeros again. Something claims the port once a call exists, and it is not this
+driver. That has not been isolated.
+
+One practical warning. The microphone is silenced locally by pointing both
+amplifiers at the unused channel, and if a capture-to-loudspeaker loop is
+started *before* that is applied, the result is acoustic feedback at full
+volume. Apply the amplifier routing first.
 
 ## Playing a recording into a call
 

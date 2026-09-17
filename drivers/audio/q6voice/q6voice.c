@@ -73,6 +73,40 @@ static unsigned int playback_port;
 module_param(playback_port, uint, 0644);
 MODULE_PARM_DESC(playback_port, "AFE port to mix into the uplink (0xffff = the DSP default pseudoport, 0 = off)");
 
+/*
+ * The AFE port the voice processor takes the microphone from.
+ *
+ * Worth being able to change. The transmit leg does not carry audio on this
+ * DSP, but naming a port still reserves it, and then nothing on the
+ * application processor can record from it: whichever claims the port first
+ * keeps it. The processor will not enable at all with PORT_ID_NONE
+ * (VSS_IVOCPROC_CMD_ENABLE returns EFAILED), but it accepts any real port,
+ * so it can be pointed at an unused one instead.
+ */
+#define VSS_IVOCPROC_PORT_ID_NONE	0xFFFF
+
+static unsigned int tx_port = AFE_PORT_ID_SLIMBUS_MULTI_CHAN_0_TX;
+module_param(tx_port, uint, 0644);
+MODULE_PARM_DESC(tx_port, "AFE port the voice processor takes the microphone from");
+
+/* q6voice_start() and _stop() take substream->stream, where 0 is playback. */
+#define Q6VOICE_STREAM_PLAYBACK	0
+
+/*
+ * Whether both directions of the voice PCM have to be open before the
+ * session starts.
+ *
+ * Opening the capture direction starts the microphone's back end, which
+ * reserves its port. That costs the microphone and buys nothing, because the
+ * transmit leg carries no audio here. With this off the session starts on the
+ * playback direction alone and the downlink works as before. Whatever opens
+ * the PCM has to open only playback to match; holdpcm.c takes "playback" as
+ * its third argument for that.
+ */
+static bool require_both = true;
+module_param(require_both, bool, 0644);
+MODULE_PARM_DESC(require_both, "wait for both directions of the voice PCM before starting");
+
 static int q6voice_path_start(struct q6voice_path *p)
 {
 	struct device *dev = p->v->dev;
@@ -121,7 +155,7 @@ static int q6voice_path_start(struct q6voice_path *p)
 	cvp = p->runtime->sessions[Q6VOICE_SERVICE_CVP];
 	if (!cvp) {
 		/* FIXME: Stop hardcoding */
-		cvp = q6cvp_session_create(p->type, AFE_PORT_ID_SLIMBUS_MULTI_CHAN_0_TX,
+		cvp = q6cvp_session_create(p->type, tx_port,
 					   AFE_PORT_ID_QUATERNARY_MI2S_RX);
 		if (IS_ERR(cvp))
 			return PTR_ERR(cvp);
@@ -208,9 +242,12 @@ int q6voice_start(struct q6voice *v, enum q6voice_path_type path, bool capture)
 
 	p->runtime->started |= BIT(capture);
 
-	/* FIXME: For now we only start if both RX/TX are active */
-	if (p->runtime->started != 3)
+	if (require_both) {
+		if (p->runtime->started != 3)
+			goto out;
+	} else if (!(p->runtime->started & BIT(Q6VOICE_STREAM_PLAYBACK))) {
 		goto out;
+	}
 
 	ret = q6voice_path_start(p);
 	if (ret) {
@@ -234,6 +271,19 @@ static void q6voice_path_stop(struct q6voice_path *p)
 	int ret;
 
 	dev_dbg(dev, "stop path %d\n", p->type);
+
+	/*
+	 * Stop in-call playback before anything else. The DSP remembers it
+	 * across sessions: leave it running and the next call's start command
+	 * comes back EALREADY, which looks like a driver that cannot start
+	 * playback when in fact it never stopped.
+	 */
+	if (playback_port && cvs) {
+		ret = q6cvs_stop_playback(cvs);
+		if (ret)
+			dev_err(dev, "failed to stop in-call playback: %d\n",
+				ret);
+	}
 
 	ret = q6mvm_start(mvm, false);
 	if (ret)
@@ -278,7 +328,8 @@ int q6voice_stop(struct q6voice *v, enum q6voice_path_type path, bool capture)
 	if (!p->runtime || !(p->runtime->started & BIT(capture)))
 		goto out;
 
-	if (p->runtime->started == 3)
+	if (require_both ? p->runtime->started == 3
+			 : (p->runtime->started & BIT(Q6VOICE_STREAM_PLAYBACK)))
 		q6voice_path_stop(p);
 
 	p->runtime->started &= ~BIT(capture);
