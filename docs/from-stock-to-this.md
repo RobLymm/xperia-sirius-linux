@@ -161,6 +161,12 @@ get nothing, the LED is not blue, or the cable does not carry data, or the
 udev rule in step 4 has not taken effect yet (try `sudo fastboot devices` to
 tell those apart).
 
+`lsusb` is the other way to check. In fastboot the phone appears as:
+
+    Bus 001 Device 0xx: ID 0fce:0dde Sony Ericsson Mobile ... S1Boot Fastboot
+
+The vendor part, `0fce`, is what matters; the product number varies.
+
 To leave fastboot at any point: `fastboot reboot`, or hold power for ten
 seconds.
 
