@@ -4,6 +4,13 @@ Drivers, device trees and extracted hardware data for the Sony Xperia Z2
 (D6503, codename sirius, msm8974pro-AB), for anyone running a mainline-based
 Linux kernel on one.
 
+**If you have a Z2 and want it running like this one, start with
+[docs/from-stock-to-this.md](docs/from-stock-to-this.md).** It is the whole
+route from the Android the phone came with: unlocking the bootloader, what to
+hold and when to plug the cable in, where to get the unlock code, what to type
+to flash, and how to take the firmware off your own phone. It assumes you have
+nothing installed.
+
 Nothing here is tied to a particular distribution. It was developed and tested
 on postmarketOS because that is the easiest way to get a mainline kernel onto
 this phone, but the drivers are ordinary kernel code and the device tree is an

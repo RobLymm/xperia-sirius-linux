@@ -1,5 +1,10 @@
 # Taking what you need off your own phone
 
+This is the background. For the step by step route from a stock phone, see
+[from-stock-to-this.md](from-stock-to-this.md), and for the script that does
+the extraction, `tools/extract-from-stock.sh`.
+
+
 Several things this port depends on are proprietary and cannot be
 redistributed: the modem, ADSP and GPU firmware. They are on your device
 already. This describes how to get at them, and at Sony's own device tree,
