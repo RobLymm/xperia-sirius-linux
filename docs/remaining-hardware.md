@@ -38,19 +38,22 @@ resume. Neither has been investigated; neither needs a new driver.
 ## Microphones
 
 Headphone playback works. The codec that carries it, a WCD9320 on SLIMbus,
-also carries all three microphones, and that half is untouched: no capture
-links in the device tree, no ADC or decimator paths, no micbias. The earpiece
+also carries all three microphones. That half is now written but has never
+recorded anything: the six capture callbacks the driver shipped as stubs are
+ported from Sony's driver, and the device tree has the SLIMBUS_0_TX link and
+the microphone routing. What it needs is someone to flash it and run
+`tools/mic-test.sh`. The earpiece
 is not part of this at all — it is a separate TFA9890 amplifier on MI2S, like
 the loudspeakers.
 
-Nothing here needs a new driver. The pieces are:
+Which physical microphone is on which of the codec's analogue inputs comes
+from Sony's stock tree: AMIC1 is the secondary microphone, AMIC2 the headset
+microphone, AMIC4 the handset microphone. AMIC5 and AMIC6 are the FM tuner's
+analogue output, which is separate work.
 
-- Capture links for `SLIMBUS_0_TX` in the codec device tree, alongside the
-  playback link that is already there.
-- The codec's ADC, decimator and micbias paths, which the driver already
-  contains but which nothing has exercised.
-- Sony's stock tree supplies the micbias and routing configuration: which
-  physical microphone is on which AMIC, and which bias each one uses.
+The bias arrangement is also a board property and is easy to get wrong: bias
+1 and 4 are filtered by capless filter 1, bias 2 by filter 2 and bias 3 by
+filter 3, all at 2.7 V from a 3.0 V LDO.
 
 Jack detection is a separate gap. The codec's MBHC hardware is not driven,
 and the driver's `set_jack` only stores the pointer. It needs the interrupt
