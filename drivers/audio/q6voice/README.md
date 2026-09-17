@@ -164,7 +164,14 @@ tell the voice processor how many channels each device has, and
 ## Playing a recording into a call
 
 **This works.** It is a separate mechanism from the microphone and does not
-depend on it.
+depend on it. `tools/call-say.sh` is the whole thing wrapped up: give it a
+number and a sentence and it rings, waits for an answer, and speaks.
+
+One thing to know before turning it on permanently: the port it taps carries
+the downlink as well, so the far end may hear itself echoed. `call-say.sh`
+switches in-call playback on for its own call and off again afterwards, which
+leaves ordinary calls alone. That is why the driver's `playback_port` default
+is off rather than 0x1006.
 
 `VSS_IPLAYBACK_CMD_START` (`0x000112BD`) on the voice stream names an AFE
 port, and the DSP reads audio from that port and mixes it into the uplink.
@@ -185,8 +192,21 @@ alike, so acceptance proves nothing; `0x1006` is the one heard at the far
 end, because it is the only one of them that anything actually feeds.
 
 The drawback of using the loudspeaker port is that the phone's own speaker
-plays the recording too. The proper fix is the pseudoport, which nothing
-local consumes. Adding it means teaching `q6afe` that port `0x8005` exists
+plays the recording too. There is a way round that without the pseudoport,
+and it is what `tools/call-say.sh` does: put the audio on the **left** channel
+only and point **both** amplifiers at the **right** channel, which then
+carries silence. The port still holds the audio for the DSP to take, and the
+speakers reproduce nothing. Confirmed on a live call: heard at the far end,
+inaudible on the phone.
+
+    amixer -c0 cset name='Speaker Top Amp Input' Right
+    amixer -c0 cset name='Speaker Bottom Amp Input' Right
+
+It works because the two amplifiers are each wired to one channel of the same
+MI2S stream and their only control is which channel they take, so pointing
+both at the unused one is the nearest thing to a mute they have.
+
+The proper fix is still the pseudoport, which nothing local consumes. Adding it means teaching `q6afe` that port `0x8005` exists
 and is started with `AFE_PSEUDOPORT_CMD_START` (`0x000100BF`) rather than
 `AFE_PORT_CMD_DEVICE_START`, giving it a DAI in `q6afe-dai`, and adding a
 back end link in the device tree.

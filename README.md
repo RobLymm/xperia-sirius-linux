@@ -50,7 +50,7 @@ the others listed there.
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. `modem/` |
 | Mobile data | Not tested | The modem starts, reports its IMEI, registers on a network and appears in ModemManager, and calls work. Data has not been tried. `modem/`, `docs/modem.md` |
 | SMS | Not tested | The modem is up and registered |
-| Calls | Working except the microphone | A call can be placed and answered, the caller's voice comes out of the phone, and the phone can play a recording into the call for the far end to hear, through the DSP's in-call playback. What does not work is the microphone: nothing it picks up reaches the far end. Voice audio goes through the DSP, and mainline has no driver for its voice services, so one is ported and adapted here; it needs no calibration data, which was the surprise. The uplink is unsolved, and `drivers/audio/q6voice/README.md` records what has been eliminated. `drivers/audio/q6voice/` |
+| Calls | Working except the microphone | A call can be placed and answered, the caller's voice comes out of the phone, and the phone can play a recording into the call for the far end to hear, through the DSP's in-call playback (`tools/call-say.sh` rings a number and speaks to it, with the phone's own speaker silent). What does not work is the microphone: nothing it picks up reaches the far end. Voice audio goes through the DSP, and mainline has no driver for its voice services, so one is ported and adapted here; it needs no calibration data, which was the surprise. The uplink is unsolved, and `drivers/audio/q6voice/README.md` records what has been eliminated. `drivers/audio/q6voice/` |
 | USB-OTG | Not tested | The USB controller is in OTG mode and the PM8941 ID detection is present; host mode has not been tried |
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
 | CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |
@@ -77,6 +77,8 @@ registers read fine.
     upstream/           a mainline-style device tree, for submission
     userspace/          the ALSA UCM profile, and fixes for 32-bit ARM
                         that are not Z2 specific
+    tools/call-say.sh   ring a number and speak to whoever answers, through
+                        the DSP rather than a microphone
     tools/              build the board device tree and a boot image, check that
                         two device trees describe the same hardware, drive the
                         Broadcom FM tuner
