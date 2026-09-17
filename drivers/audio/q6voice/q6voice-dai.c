@@ -30,12 +30,41 @@ module_param(voice_path, int, 0644);
 MODULE_PARM_DESC(voice_path,
 		 "DSP voice session to open (0 = default modem voice)");
 
-static int q6voice_dai_startup(struct snd_pcm_substream *substream,
+/*
+ * Start the session from prepare, not from startup.
+ *
+ * startup runs when the PCM is opened, which is before hw_params has
+ * configured the back ends. The voice processor is created with the AFE port
+ * numbers it is to use, so creating it that early means naming a transmit
+ * port the DSP has not been told about yet: the uplink port was being
+ * configured about thirty milliseconds after the session had already
+ * started.
+ *
+ * The downlink did not suffer from this, which is what made it confusing.
+ * Its port carries ordinary loudspeaker playback as well, so it is already
+ * configured and running long before a call, whatever this driver does. The
+ * uplink port has no other user, so only that direction was silent.
+ *
+ * ASoC runs prepare on the back ends before the front end, and back end
+ * hw_params earlier still, so by the time this is called both ports exist
+ * and are started.
+ */
+static int q6voice_dai_prepare(struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *dai)
 {
 	struct q6voice *v = snd_soc_dai_get_drvdata(dai);
+	int ret;
 
-	return q6voice_start(v, voice_path, substream->stream);
+	ret = q6voice_start(v, voice_path, substream->stream);
+
+	/*
+	 * prepare can be called again on a stream that is already running,
+	 * after an underrun for instance. That is not an error here.
+	 */
+	if (ret == -EALREADY)
+		return 0;
+
+	return ret;
 }
 
 static void q6voice_dai_shutdown(struct snd_pcm_substream *substream,
@@ -47,7 +76,7 @@ static void q6voice_dai_shutdown(struct snd_pcm_substream *substream,
 }
 
 static struct snd_soc_dai_ops q6voice_dai_ops = {
-	.startup = q6voice_dai_startup,
+	.prepare = q6voice_dai_prepare,
 	.shutdown = q6voice_dai_shutdown,
 };
 

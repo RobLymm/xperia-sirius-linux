@@ -1,0 +1,128 @@
+Answer the MiscTA message the modem sends when a call ends.
+
+The modem sends message 4 on QMI service 228 at the end of every
+answered call and waits for a reply. Ignoring it starves the modem's
+non-volatile storage task, and a couple of minutes later its own
+watchdog kills the firmware:
+
+  qcom-q6v5-mss fc880000.remoteproc: fatal error received:
+    dog.c:1639:Watchdog detects task starvation of nve
+
+The modem then reloads and re-enumerates, ModemManager loses and
+refinds it, and incoming calls are refused in between.
+
+What the message asks for is not known. If it is a write, guessing at
+one would be worse than not writing, because that partition holds the
+radio calibration, so this reports success and writes nothing, which
+is enough to let the modem's task finish. The transaction id is read
+straight from the QMI header because libqrtr's decoder rejects any TLV
+it has no definition for.
+
+--- a/qmi_ta228.qmi	2026-09-17 18:49:41.284895513 +0100
++++ b/qmi_ta228.qmi	2026-09-17 19:09:28.411491595 +0100
+@@ -20,3 +20,12 @@
+ 	required u32 result = 1;
+ 	required u8 data(65535) = 16;
+ } = 2;
++
++const TA228_ACK = 4;
++
++request ack_req {
++} = 4;
++
++response ack_resp {
++	required u32 result = 1;
++} = 4;
+--- a/main.c	2026-09-17 18:49:40.771504820 +0100
++++ b/main.c	2026-09-17 19:09:27.720490559 +0100
+@@ -33,6 +33,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <endian.h>
+ #include <libqrtr.h>
+ 
+ #include "qmi_ta227.h"
+@@ -315,6 +316,73 @@
+ 	return ret;
+ }
+ 
++/* The QMI header, ahead of the TLVs, in the order it appears on the wire. */
++struct ta_qmi_header {
++	uint8_t type;
++	uint16_t txn_id;
++	uint16_t msg_id;
++	uint16_t msg_len;
++} __attribute__((packed));
++
++/*
++ * Answer a MiscTA message without acting on it.
++ *
++ * The modem sends message 4 at the end of every call. Leaving it unanswered
++ * starves the modem's non-volatile storage task, and a couple of minutes
++ * later its own watchdog kills the firmware:
++ *
++ *   qcom-q6v5-mss fc880000.remoteproc: fatal error received:
++ *     dog.c:1639:Watchdog detects task starvation of nve
++ *
++ * The modem then reloads, ModemManager loses and refinds it, and incoming
++ * calls are refused in between.
++ *
++ * Nothing here knows what the message asks for. If it is a write, guessing at
++ * one would be worse than not writing at all, because that partition holds
++ * the radio calibration. So this reports success and writes nothing, which is
++ * enough to let the modem's task finish.
++ */
++static int ta228_ack(int sock, struct qrtr_packet *pkt, unsigned int msg_id)
++{
++	DEFINE_QRTR_PACKET(resp_buf, 128);
++	const struct ta_qmi_header *hdr;
++	struct ta228_ack_resp resp = {};
++	unsigned int txn;
++	int ret;
++
++	/*
++	 * Decoding the request is not possible: libqrtr rejects any TLV it has
++	 * no definition for, and the layout of this message is not known. The
++	 * transaction id is all a reply needs, and that sits in the QMI header
++	 * ahead of the TLVs, so read it from there.
++	 */
++	if (pkt->data_len < sizeof(*hdr)) {
++		fprintf(stderr, "[TA228] message %d too short\n", msg_id);
++		return -1;
++	}
++
++	hdr = pkt->data;
++	txn = le16toh(hdr->txn_id);
++
++	resp.result = 0;
++
++	ret = qmi_encode_message(&resp_buf, QMI_RESPONSE, msg_id, txn,
++				 &resp, ta228_ack_resp_ei);
++	if (ret < 0) {
++		fprintf(stderr, "[TA228] failed to encode response\n");
++		return ret;
++	}
++
++	ret = qrtr_sendto(sock, pkt->node, pkt->port, resp_buf.data,
++			  resp_buf.data_len);
++	if (ret < 0)
++		fprintf(stderr, "[TA228] failed to send response\n");
++	else
++		fprintf(stderr, "[TA228] acknowledged message %d\n", msg_id);
++
++	return ret;
++}
++
+ static int handle_ta228(int sock, struct qrtr_packet *pkt)
+ {
+ 	unsigned int msg_id;
+@@ -334,7 +402,7 @@
+ 			ta228_read(sock, pkt);
+ 			break;
+ 		default:
+-			fprintf(stderr, "Unhandled TA228 message: %d\n", msg_id);
++			ta228_ack(sock, pkt, msg_id);
+ 			break;
+ 		}
+ 		break;

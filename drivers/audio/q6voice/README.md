@@ -1,7 +1,11 @@
 # Call audio: the DSP's voice services
 
-**Calls carry audio in both directions.** Tested on a live call: the far end
-hears this phone's microphone, and the caller's voice comes out of this phone.
+**The downlink works. The uplink does not.** On a live call the caller's
+voice comes out of this phone. Nothing from this phone's microphone reaches
+the far end, and as far as is known it never has. An earlier version of this
+file claimed both directions worked, on the strength of one call report that
+was later withdrawn; treat "it establishes" and "it carries audio" as
+entirely separate claims here, because this driver is very good at the first.
 
 On Qualcomm platforms of this generation the modem hands voice audio to the
 audio DSP, and the DSP will not carry it until its voice services have been
@@ -35,6 +39,10 @@ Six commands, and no calibration data of any kind. The voice processor is
 created with the `TX_SM_ECNS` and `RX_DEFAULT` topologies, tx port
 `SLIMBUS_0_TX`, rx port `QUAT_MI2S_RX`, profile `CAL_NETWORK_ID_NONE`, mode
 `EC_INT_MIXING`.
+
+That is enough for the downlink. What the uplink additionally needs is not
+known; the section below records what it is not, so the same ground is not
+covered again.
 
 ## What the adaptation needed
 
@@ -94,15 +102,65 @@ Calibration is still worth having eventually — it is what the tuned
 topologies use, and what Sony's own stack loads from its `acdbdata` blobs —
 but it buys audio quality, not audio.
 
-## A consequence of TX_SM_ECNS
+## The uplink: what it is not
 
-`TX_SM_ECNS` is single-microphone echo cancellation and noise suppression.
-The uplink has the loudspeaker's own output subtracted from it, which is what
-stops the far end hearing itself. It also means **audio played out of this
-phone's speaker during a call does not reach the far end**: the echo
-canceller removes it, correctly. Sending a recording down the line needs the
-DSP's in-call playback command, `VSS_IPLAYBACK_CMD_START` on the voice
-stream, which this driver does not implement.
+Everything below was measured on this phone, and none of it fixed the uplink.
+It is recorded because each one looked like the answer.
+
+**It is not the application processor side.** During a voice session the
+codec's whole capture chain reads powered — `AMIC4`, `ADC4`, `DEC3 MUX`,
+`SLIM TX7 MUX`, `AIF1_CAP Mixer`, `AIF1 CAP`, `AIF1 Capture`, all `On in 2
+out 1` — identically to an ordinary capture that records real audio. The AFE
+port configuration is identical too, byte for byte: `port 0x4001, rate 48000,
+nch 1, map 134`. The same codec route, at the same moment, delivers RMS 200
+of room noise to an `arecord` on MultiMedia1.
+
+**It is not the port start ordering,** although there was a real bug there.
+The session used to start from the DAI's `startup` callback, which runs when
+the PCM is opened, before `hw_params` has configured the back ends: the
+uplink port was configured about thirty milliseconds *after* the voice
+processor had been created naming it. The downlink never suffered from this,
+because its port carries ordinary loudspeaker playback and so is already
+running. That asymmetry matched the symptom exactly, and fixing it (the
+session now starts from `prepare`) changed nothing audible. The fix is kept
+because the old order was indefensible, not because it helped.
+
+**It is not a mute.** `VSS_IVOLUME_CMD_MUTE_V2` is sent for both directions
+at session start, accepted with status 0. Silence either way.
+
+**It is not the echo canceller.** `TX_SM_ECNS` is single-microphone echo
+cancellation and noise suppression, and an echo canceller with a bad
+reference cancels everything, which would silence the uplink and leave the
+downlink alone. Setting `tx_topology` to `TOPOLOGY_ID_NONE` while leaving
+`rx_topology` at `RX_DEFAULT` is accepted by the DSP and makes no difference.
+
+**It is not the missing voice stream.** Creating an AP-side CVS and attaching
+it (`attach_stream=Y`) alongside the real topologies is accepted in full —
+`0x11140`, `0x1123c`, `0x112bf` all status 0 — and is also silent. This is
+worth stating because it is the combination Sony's own driver for this
+platform uses, and because it was never tested in isolation: the topologies
+were fixed and the stream removed in the same change.
+
+**It is not the 48 kHz back end rate,** most likely. The machine driver's
+`be_hw_params_fixup` forces every back end to 48 kHz while the voice front
+end declares 8 kHz. That looked suspicious, but a voice processor is a
+device-side processor that resamples between the device ports and the
+vocoder, and downstream runs 48 kHz device ports on this generation too.
+Untested rather than eliminated.
+
+Candidates not yet tried: `VSS_IVOCPROC_CMD_TOPOLOGY_SET_DEV_CHANNELS`, to
+tell the voice processor how many channels each device has, and
+`VSS_IVOCPROC_CMD_SET_DEVICE_V2` after enable.
+
+## Playing a recording into a call
+
+Audio played out of the loudspeaker during a call does not reach the far end,
+and will not even once the uplink works: `TX_SM_ECNS` subtracts the
+loudspeaker's own output from the microphone signal, which is what stops the
+far end hearing itself. Sending a recording down the line is a separate
+feature needing the DSP's in-call playback command,
+`VSS_IPLAYBACK_CMD_START` on the voice stream. That requires an AP-side
+stream, which is why the `attach_stream` code is kept rather than deleted.
 
 ## Porting to 6.16
 

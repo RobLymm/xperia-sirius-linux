@@ -102,10 +102,33 @@ calls work: the AT service on this modem does not track circuit-switched
 state. Telephony is on the QMI port. Do not diagnose call problems from this
 port, which is the mistake made here first.
 
+## Call audio only works one way
+
+The caller's voice comes out of the phone; nothing from the phone's
+microphone reaches the far end. The application processor side of the uplink
+has been eliminated by measurement — the codec's capture chain is powered and
+the AFE port configured identically to an ordinary capture that records real
+audio at the same moment. See `../drivers/audio/q6voice/README.md`, which
+lists what else has been ruled out.
+
+## Capture returns exact zeros on some attempts
+
+Recording from the handset microphone succeeds most of the time and
+occasionally returns nothing at all: the right number of frames, every sample
+exactly zero, no error anywhere. Six consecutive two-second recordings gave
+190, 0, 186, 0, 194, 0; a later four gave 193, 187, 166, 0. So it is not a
+strict alternation.
+
+The driver's trace is identical on a good run and a zero run — same channel
+(`ch 134 6 6`), same AFE port configuration — so nothing is being configured
+differently. That points at a race in SLIMbus channel activation rather than
+a wrong value, which matches the comments already in `wcd9320.c` about
+leftovers from a previous stream. Unfixed.
+
 ## Microphones
 
-Capture works for the handset microphone, and call audio works in both
-directions. Two faults remain: capture returns exact zeros on roughly every
+Capture works for the handset microphone, subject to the intermittency
+above. Two faults remain: capture returns exact zeros on roughly every
 other attempt, and the secondary microphone reads nothing. There is also no
 headphone jack detection, which needs `CONFIG_REGMAP_IRQ`. See
 `../drivers/audio/README.md` and `../drivers/audio/q6voice/README.md`.

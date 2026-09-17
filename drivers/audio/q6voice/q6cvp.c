@@ -27,9 +27,10 @@
 #define VSS_ICOMMON_CAL_NETWORK_ID_NONE			0x0001135E
 
 /*
- * Mute and volume are not needed to bring a call up: the DSP defaults to
- * unmuted at a usable level. They are here for a future mixer control, and
- * for in-call mute in a dialer.
+ * Nothing sets a volume or a mute state when a session starts, so whatever
+ * the DSP defaults to is what a call gets. Sending both explicitly rules out
+ * the dullest possible explanation for a session that establishes and is
+ * silent.
  */
 #define VSS_IVOLUME_CMD_MUTE_V2				0x0001138B
 #define VSS_IVOLUME_CMD_SET_STEP			0x000112C2
@@ -56,35 +57,27 @@
 
 /*
  * The voice processor is created with a processing topology for each
- * direction, and these two defaults are what carry a call on this phone.
- * They need no calibration data, which is worth stating because the obvious
- * assumption is the opposite.
+ * direction. These two are what the msm8916 driver this is ported from uses,
+ * and it runs a call with no calibration data at all. The V2 topologies do
+ * need calibration and are rejected here with EBADPARAM.
  *
- * Three facts, each established by asking this DSP:
+ * A vocproc created with the "no topology" identifier contains no processing,
+ * which is why a session built that way establishes completely and then
+ * carries no audio in either direction.
  *
- *  - TOPOLOGY_ID_NONE is accepted and produces a vocproc containing no
- *    processing. A session built that way establishes completely, every
- *    command returning success, and then carries no audio in either
- *    direction. It is the most misleading result available here.
- *  - The V2 topologies, TX_SM_ECNS_V2 among them, are rejected with
- *    EBADPARAM. Those are the ones that need calibration loaded first.
- *  - TX_SM_ECNS with RX_DEFAULT is accepted and carries audio both ways.
- *
- * TX_SM_ECNS is single-microphone echo cancellation and noise suppression,
- * so the uplink has the loudspeaker's own output subtracted from it. Audio
- * played out of the phone's speaker during a call will not reach the far
- * end; that path needs the DSP's in-call playback command instead.
- *
- * Parameters rather than constants because which combination a given DSP
- * will accept is only discoverable by asking it.
+ * Unused reasoning kept below: a real topology needs calibration loaded
+ * into the DSP first, and nothing here does that yet, so the default is the
+ * "no topology" identifier, which asks for a plain connection with no
+ * processing. Parameters rather than constants because which combination a
+ * given DSP will accept is only discoverable by asking it.
  */
 static unsigned int tx_topology = VSS_IVOCPROC_TOPOLOGY_ID_TX_SM_ECNS;
 module_param(tx_topology, uint, 0644);
-MODULE_PARM_DESC(tx_topology, "uplink processing topology (0x10f71 = echo cancel and noise suppress)");
+MODULE_PARM_DESC(tx_topology, "uplink processing topology (0x10f70 = none)");
 
 static unsigned int rx_topology = VSS_IVOCPROC_TOPOLOGY_ID_RX_DEFAULT;
 module_param(rx_topology, uint, 0644);
-MODULE_PARM_DESC(rx_topology, "downlink processing topology (0x10f77 = default)");
+MODULE_PARM_DESC(rx_topology, "downlink processing topology (0x10f70 = none)");
 
 static unsigned int vocproc_mode = VSS_IVOCPROC_VOCPROC_MODE_EC_INT_MIXING;
 module_param(vocproc_mode, uint, 0644);

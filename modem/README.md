@@ -48,3 +48,20 @@ only open/close/read/iterate and get_size/read, replies nothing to the rest,
 and nothing on this phone serves 230 (`mlog_qmi_service`, the modem's log
 sink). The modem initialises regardless; add no-op replies if a later step
 turns out to block on a write.
+
+**That step turned up.** The modem sends message 4 on service 228 at the end
+of every answered call and waits for a reply. Ignoring it starves the modem's
+non-volatile storage task, and a couple of minutes later its own watchdog
+kills the firmware with `dog.c:1639:Watchdog detects task starvation of nve`,
+after which it reloads, re-enumerates with a new ModemManager index, and
+refuses incoming calls in between. `ta-service/0002-*.patch` answers it with
+a success result and writes nothing, which is enough to let the task finish;
+what the message actually asks for is still unknown, and guessing at a write
+into the trim area would be worse than not writing, since that partition
+holds the radio calibration.
+
+Two things worth knowing if you go near this. The modem re-enumerates with a
+new index after a restart, so nothing should hardcode `-m 0`. And asking this
+modem for a low power state (`mmcli -m N --set-power-state-low`) crashes it
+rather than turning the radio off, because a wedged task cannot service the
+deactivate; use `--reset`.

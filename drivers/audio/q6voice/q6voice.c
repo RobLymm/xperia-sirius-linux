@@ -59,6 +59,10 @@ static bool attach_stream;
 module_param(attach_stream, bool, 0644);
 MODULE_PARM_DESC(attach_stream, "create a CVS stream on the AP side and attach it");
 
+static bool unmute = true;
+module_param(unmute, bool, 0644);
+MODULE_PARM_DESC(unmute, "send an explicit unmute for both directions when a call starts");
+
 static int q6voice_path_start(struct q6voice_path *p)
 {
 	struct device *dev = p->v->dev;
@@ -136,6 +140,22 @@ static int q6voice_path_start(struct q6voice_path *p)
 	if (ret) {
 		dev_err(dev, "failed to start voice: %d\n", ret);
 		goto start_err;
+	}
+
+	/*
+	 * The downlink comes up audible without being told anything, and the
+	 * uplink does not, so the two do not default alike: this DSP appears
+	 * to start with the microphone direction muted. Android's audio HAL
+	 * sets the mute state explicitly at the start of every call rather
+	 * than trusting a default, and so do we.
+	 *
+	 * Not fatal if it fails. A call with one direction is worth more than
+	 * no call, and the log says which happened.
+	 */
+	if (unmute) {
+		ret = q6cvp_set_mute(cvp, false);
+		if (ret)
+			dev_err(dev, "failed to unmute: %d\n", ret);
 	}
 
 	return 0;
