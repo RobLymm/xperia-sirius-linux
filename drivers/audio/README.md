@@ -1,8 +1,13 @@
 # Audio on the Xperia Z2
 
-Speakers, the earpiece and headphone playback all work. Microphones do not:
-they are on the same codec as the headphones and still need its capture path
-brought up.
+Speakers, the earpiece, headphone playback, the handset microphone and call
+audio all work. What is left is smaller: capture is intermittent, the
+secondary microphone reads nothing, and there is no headphone jack detection.
+
+Call audio goes through the DSP's voice services, which mainline has no
+driver for. One is ported in `q6voice/`; read that directory's README before
+assuming anything about it, because the configuration that is silent looks
+identical in the logs to the one that works.
 
 ## The working path
 
@@ -175,10 +180,10 @@ do not behave the way a phone's should. This is userspace only, it needs no
 kernel work, and `alsa-ucm-conf` accepts contributions on GitHub. It is
 probably the highest value per hour of anything left in this directory.
 
-**Headphones and microphones.** These are on a WCD9320 (Taiko) codec on
-SLIMbus, whose master is inside the ADSP (an NGD satellite on the apps
-side). The earpiece is not affected — it is a separate TFA9890 amplifier on
-MI2S, the same as the loudspeakers, and already works.
+**~~Headphones and microphones~~** — both work now. They are on a WCD9320
+(Taiko) codec on SLIMbus, whose master is inside the ADSP (an NGD satellite
+on the apps side). The earpiece was never affected — it is a separate TFA9890
+amplifier on MI2S, the same as the loudspeakers. What each piece needed:
 
 - *SLIMbus.* Mainline's `qcom-ngd-ctrl` already handles NGD v1.5.0 (msm8996)
   and v2.1.0 (sdm845); the Fairphone 2 / Nexus 5 work declares the msm8974
@@ -198,8 +203,10 @@ MI2S, the same as the loudspeakers, and already works.
   SLIMbus, every register write lands, every widget reports itself powered,
   and nothing comes out of the jack.
 
-Playback now runs end to end: the ADSP starts the SLIMbus port, the whole
-path from `AIF1 PB` to `HPHL`/`HPHR` powers up, and the headphone amplifier
-status registers respond to the signal while a tone plays. Microphones are
-untested and have no device tree links, there is no jack detection, and there
-is no UCM profile for the jack. See `drivers/audio/wcd9320/README.md`.
+Playback runs end to end and has been heard: the ADSP starts the SLIMbus
+port, the whole path from `AIF1 PB` to `HPHL`/`HPHR` powers up, and the
+headphone amplifier status registers respond to the signal while a tone
+plays. The handset microphone records. Still open: capture returns exact
+zeros on roughly every other attempt, the secondary microphone reads nothing,
+and there is no jack detection (it needs `CONFIG_REGMAP_IRQ`) or UCM profile
+for the jack. See `wcd9320/README.md`.

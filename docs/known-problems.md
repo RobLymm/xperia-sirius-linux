@@ -60,7 +60,36 @@ of movement to register.
 Works. It needs `ta-service` to answer the Sony trim-area requests, or its
 own watchdog kills it after about forty seconds. See `modem.md`.
 
+## A call can leave the modem holding a stale call
+
+Observed once, after an outgoing call that worked and carried audio in both
+directions. The next incoming call was refused by the network, with "it has
+not been possible to connect your call" at the calling end.
+
+ModemManager showed no calls and reported the modem registered. The modem's
+own AT interface disagreed:
+
+    AT+CLCC  ->  +CLCC: 1,1,0,1,0,"",128
+
+One call, inbound, state active, still held. `AT+CHUP` returned `OK` and did
+not clear it. `mmcli -m 0 --reset` did clear it, and the modem came back
+registered.
+
+Not yet known: whether every call leaves this behind, or whether it was a
+one-off. Worth checking `AT+CLCC` on `/dev/wwan0at0` after a call before
+concluding anything about the voice driver, because a modem that believes it
+is busy looks exactly like broken call handling.
+
+One reading to avoid: on this modem the AT service does not track
+circuit-switched state, so `AT+CREG?` reports `0,2` (searching) and `AT+CSQ`
+reports `99,99` even while the QMI interface reports the modem registered and
+calls work. Telephony is on the QMI port. Only the call list above proved
+anything.
+
 ## Microphones
 
-No capture path yet. Headphone playback works. See
-`../drivers/audio/README.md`.
+Capture works for the handset microphone, and call audio works in both
+directions. Two faults remain: capture returns exact zeros on roughly every
+other attempt, and the secondary microphone reads nothing. There is also no
+headphone jack detection, which needs `CONFIG_REGMAP_IRQ`. See
+`../drivers/audio/README.md` and `../drivers/audio/q6voice/README.md`.

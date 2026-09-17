@@ -47,6 +47,18 @@ struct q6voice {
 	struct q6voice_path paths[Q6VOICE_PATH_COUNT];
 };
 
+/*
+ * A modem call is the modem's stream: the modem creates its own CVS and
+ * attaches it to the passive voice manager session, which it finds by name.
+ * Creating one here as well and attaching that puts an empty stream in the
+ * slot the modem's should occupy. That starts cleanly and moves no audio in
+ * either direction. Off by default; the code is kept for a stream the AP
+ * really does own, such as VoIP.
+ */
+static bool attach_stream;
+module_param(attach_stream, bool, 0644);
+MODULE_PARM_DESC(attach_stream, "create a CVS stream on the AP side and attach it");
+
 static int q6voice_path_start(struct q6voice_path *p)
 {
 	struct device *dev = p->v->dev;
@@ -60,28 +72,36 @@ static int q6voice_path_start(struct q6voice_path *p)
 		mvm = q6mvm_session_create(p->type);
 		if (IS_ERR(mvm))
 			return PTR_ERR(mvm);
+
+		/*
+		 * Dual control has to reach the session before anything is
+		 * attached to it: it is what tells the DSP the modem is a
+		 * co-controller of this session rather than the AP alone.
+		 */
+		ret = q6mvm_set_dual_control(mvm);
+		if (ret) {
+			dev_err(mvm->dev, "failed to set dual control: %d\n", ret);
+			q6voice_session_release(mvm);
+			return ret;
+		}
+
 		p->runtime->sessions[Q6VOICE_SERVICE_MVM] = mvm;
 	}
 
-	cvs = p->runtime->sessions[Q6VOICE_SERVICE_CVS];
-	if (!cvs) {
-		cvs = q6cvs_session_create(p->type);
-		if (IS_ERR(cvs))
-			return PTR_ERR(cvs);
-		p->runtime->sessions[Q6VOICE_SERVICE_CVS] = cvs;
-	}
+	if (attach_stream) {
+		cvs = p->runtime->sessions[Q6VOICE_SERVICE_CVS];
+		if (!cvs) {
+			cvs = q6cvs_session_create(p->type);
+			if (IS_ERR(cvs))
+				return PTR_ERR(cvs);
+			p->runtime->sessions[Q6VOICE_SERVICE_CVS] = cvs;
+		}
 
-	ret = q6mvm_attach_stream(mvm, cvs, true);
-	if (ret) {
-		dev_err(mvm->dev, "failed to attach stream: %d\n", ret);
-		return ret;
-	}
-
-	ret = q6mvm_set_dual_control(mvm);
-	if (ret) {
-		dev_err(mvm->dev, "failed to set dual control: %d\n", ret);
-		q6voice_session_release(mvm);
-		return ret;
+		ret = q6mvm_attach_stream(mvm, cvs, true);
+		if (ret) {
+			dev_err(mvm->dev, "failed to attach stream: %d\n", ret);
+			return ret;
+		}
 	}
 
 	cvp = p->runtime->sessions[Q6VOICE_SERVICE_CVP];
@@ -118,7 +138,7 @@ static int q6voice_path_start(struct q6voice_path *p)
 		goto start_err;
 	}
 
-	return ret;
+	return 0;
 
 start_err:
 	q6mvm_start(mvm, false);
@@ -189,9 +209,12 @@ static void q6voice_path_stop(struct q6voice_path *p)
 	if (ret)
 		dev_err(dev, "failed to disable cvp: %d\n", ret);
 
-	ret = q6mvm_attach_stream(mvm, cvs, false);
-	if (ret)
-		dev_err(dev, "failed to detach stream from mvm: %d\n", ret);
+	/* There is only a stream to detach if we were the one who attached it. */
+	if (cvs) {
+		ret = q6mvm_attach_stream(mvm, cvs, false);
+		if (ret)
+			dev_err(dev, "failed to detach stream from mvm: %d\n", ret);
+	}
 }
 
 static void q6voice_path_destroy(struct q6voice_path *p)
