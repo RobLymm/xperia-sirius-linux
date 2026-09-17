@@ -18,6 +18,18 @@ every boot.
 The profile is looked up by the card's name with spaces replaced by
 underscores, which is why the conf.d directory is `Sony_Xperia_Z2`.
 
+## Why the speaker route is in the verb
+
+PulseAudio opens the PCM to probe a profile before it enables any of that
+profile's devices. On this card the front end cannot open at all unless a back
+end is routed, so probing failed, the card dropped to a null sink, and the
+phone had no audio until something set the routing mixer by hand. Putting the
+speaker route in the verb's EnableSequence, as well as in the Speaker device,
+means the card always loads.
+
+Use `#` for comments in these files. A `/* */` block makes the whole profile
+fail to parse, and the only symptom is a card that will not load.
+
 ## The headphone jack is not a device here
 
 It works, and the mixer settings that reach it are known, but it is left out

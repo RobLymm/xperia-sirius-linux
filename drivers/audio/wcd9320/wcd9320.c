@@ -2436,7 +2436,13 @@ static int wcd9320_slim_set_hw_params(struct wcd9320_codec *wcd,
 			if (ret < 0)
 				goto err;
 
-			/* configure the slave port for water mark and enable*/
+			/*
+			 * Configure the slave port's watermark and enable it.
+			 * The base differs per direction on this chip: 0x50
+			 * for transmit ports and 0x30 for receive, the latter
+			 * cancelling the 16 that receive slave ports start at.
+			 * Sony's wcd9xxx-slimslave.c has both.
+			 */
 			ret = regmap_write(wcd->if_regmap,
 					WCD9320_SLIM_PGD_TX_PORT_CFG(ch->port),
 					WCD9320_SLIM_WATER_MARK_VAL);
@@ -3290,6 +3296,20 @@ static const struct snd_soc_dapm_route wcd9320_audio_map[] = {
 	{DAPM_MICBIAS2_EXTERNAL_STANDALONE, NULL, "LDO_H Standalone"},
 };
 
+/*
+ * The microphone bias outputs are declared as micbias widgets rather than as
+ * supply widgets, which is what downstream used and what board routing
+ * expects. A supply cannot have a non-supply source, so a device tree
+ * carrying Sony's idiom, "MIC BIAS1 External" fed by a named microphone,
+ * makes the whole sound card fail to probe. A micbias widget still powers
+ * from DAPM and still gets the event callback; it is simply not flagged as a
+ * supply, so it can sit in the signal path where the routing puts it.
+ */
+#define WCD9320_MICBIAS_E(wname, wshift, wevent, wflags) \
+{	.id = snd_soc_dapm_micbias, .name = wname, \
+	.reg = SND_SOC_NOPM, .shift = wshift, .mask = 1, .on_val = 1, \
+	.off_val = 0, .event = wevent, .event_flags = wflags }
+
 static const struct snd_soc_dapm_widget wcd9320_dapm_widgets[] = {
 	/* RX stuff */
 	SND_SOC_DAPM_OUTPUT("EAR"),
@@ -3517,18 +3537,15 @@ static const struct snd_soc_dapm_widget wcd9320_dapm_widgets[] = {
 		SND_SOC_DAPM_PRE_PMD),
 
 	SND_SOC_DAPM_INPUT("AMIC1"),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS1 External", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS1 Internal1", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS1 Internal2", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS1 External", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS1 Internal1", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS1 Internal2", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_INPUT("AMIC3"),
 
@@ -3612,38 +3629,30 @@ static const struct snd_soc_dapm_widget wcd9320_dapm_widgets[] = {
 			       7, 0, taiko_codec_enable_micbias,
 			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
 			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS2 External", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS2 Internal1", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU |
-			       SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS2 Internal2", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS2 Internal3", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS3 External", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS3 Internal1", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU |
-			       SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS3 Internal2", SND_SOC_NOPM, 7, 0,
-			       taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU |
-			       SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY("MIC BIAS4 External", SND_SOC_NOPM, 7,
-			       0, taiko_codec_enable_micbias,
-			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
-			       SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS2 External", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS2 Internal1", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS2 Internal2", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS2 Internal3", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS3 External", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS3 Internal1", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS3 Internal2", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
+	WCD9320_MICBIAS_E("MIC BIAS4 External", 7,
+			  taiko_codec_enable_micbias,
+			  SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_AIF_OUT_E("AIF1 CAP", "AIF1 Capture", 0, SND_SOC_NOPM,
 		AIF1_CAP, 0, taiko_codec_enable_slimtx,

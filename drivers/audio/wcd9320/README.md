@@ -15,12 +15,21 @@ registers its DAIs and controls, and the whole playback path powers up:
 `AIF1 PB` through `SLIM RX1/RX2 MUX`, `RX1/RX2 MIX1`, `CLASS_H_DSM MUX` and
 `HPHL/HPHR DAC` to `HPHL`/`HPHR`.
 
-Capture is written but not yet tested on hardware: the six `unimplemented`
-stubs this branch shipped for the capture side, microphone bias, the ADCs,
-the decimators, the digital microphones, the SLIMbus TX ports and the `LDO_H`
-supply, are now ported from Sony's driver. It needs a device tree carrying
-the `SLIMBUS_0_TX` link and the microphone routing, which is in
-`devicetree/qcom-msm8974pro-sony-xperia-sirius-codec.dts`.
+Capture is written, and the codec half of it is verified on hardware: with a
+route set from an analogue input through its converter, a decimator and a
+SLIMbus port, every widget from the input to `AIF1 CAP` powers up, the
+microphone bias and its capless filter switch on at the right voltages, the
+converter and decimator clocks run, the decimator is unmuted with its high
+pass at 150 Hz, and the codec reports the right SLIMbus channel. What does
+not work is the other end: the DSP refuses to start `SLIMBUS_0_TX`, returning
+`ADSP_EALREADY` from `AFE_PORT_CMD_DEVICE_START`, so the PCM cannot open.
+
+Ruled out for that refusal: it happens on the first attempt of a clean boot,
+with only one call to `q6afe_port_start` (traced), with the card released from
+the sound server, with and without a playback stream already running, from
+either front end, and with the slave port configuration register at either of
+the two addresses the register map could mean. The playback direction of the
+same bus works throughout.
 
 There is no jack detection.
 
@@ -135,7 +144,14 @@ which is what stops the amplifier popping when it powers up.
 
 ## Still to do
 
-- Test the capture path on hardware and find what it still needs.
+- Find why the DSP will not start the SLIMbus capture port. Worth comparing
+  against a downstream capture trace: Sony's driver configures the slave port
+  from the DAPM power-up of the SLIMbus TX widget, after the machine driver
+  has started the AFE port, whereas this one does it from the DAI's prepare.
+- One bug to fix while doing it: the decimator sample rate is written using
+  the SLIMbus port number where it should use the decimator number. It is
+  harmless today only because every decimator's rate register already holds
+  48 kHz.
 - Digital microphones: `taiko_codec_enable_dmic` is deliberately left empty,
   because the shinano phones have none.
 - Jack detection, which needs regmap-irq or an equivalent, and the MBHC
