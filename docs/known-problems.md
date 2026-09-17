@@ -60,31 +60,47 @@ of movement to register.
 Works. It needs `ta-service` to answer the Sony trim-area requests, or its
 own watchdog kills it after about forty seconds. See `modem.md`.
 
-## A call can leave the modem holding a stale call
+## The modem's registration module can wedge, and calls stop arriving
 
-Observed once, after an outgoing call that worked and carried audio in both
-directions. The next incoming call was refused by the network, with "it has
-not been possible to connect your call" at the calling end.
+Seen after an outgoing call that worked and carried audio both ways.
+Incoming calls were then refused by the network, with "it has not been
+possible to connect your call" at the calling end. ModemManager reported the
+modem registered the whole time, on GSM/GPRS at 28% signal, cached.
 
-ModemManager showed no calls and reported the modem registered. The modem's
-own AT interface disagreed:
+The cause was in the kernel log, and only appeared once the modem was asked
+to change power state:
 
-    AT+CLCC  ->  +CLCC: 1,1,0,1,0,"",128
+    qcom-q6v5-mss fc880000.remoteproc: fatal error received:
+      mmoc.c:1998:NAS(REG) did not respond to deactivate for 72s
 
-One call, inbound, state active, still held. `AT+CHUP` returned `OK` and did
-not clear it. `mmcli -m 0 --reset` did clear it, and the modem came back
-registered.
+The modem's network access stratum, the part that owns registration, had
+stopped answering. The modem's own watchdog then declared a fatal error and
+reloaded its firmware. After the reload the modem came back on **LTE at 68%
+live signal**, where before it had been GSM/GPRS at 28% cached — so the weak
+registration was the symptom of the wedge, not poor coverage.
 
-Not yet known: whether every call leaves this behind, or whether it was a
-one-off. Worth checking `AT+CLCC` on `/dev/wwan0at0` after a call before
-concluding anything about the voice driver, because a modem that believes it
-is busy looks exactly like broken call handling.
+`mmcli -m N --set-power-state-low` is what surfaced this, by asking for a
+deactivate the wedged module could not service. On this modem that request
+crashes it rather than turning the radio off. Use `--reset`, or let the
+watchdog do it.
 
-One reading to avoid: on this modem the AT service does not track
-circuit-switched state, so `AT+CREG?` reports `0,2` (searching) and `AT+CSQ`
-reports `99,99` even while the QMI interface reports the modem registered and
-calls work. Telephony is on the QMI port. Only the call list above proved
-anything.
+Note the modem re-enumerates with a new index after a restart, so anything
+that addresses it needs to look the index up each time rather than hardcode
+`-m 0`.
+
+### AT+CLCC is not evidence on this modem
+
+While chasing the above, `AT+CLCC` on `/dev/wwan0at0` reported a held call:
+
+    +CLCC: 1,1,0,1,0,"",128
+
+That reading is worthless here. It survived `AT+CHUP`, a `--reset`, and a
+complete modem firmware reload, and it reports mode 1 (data) with an empty
+number, which is not a voice call. The same port reports `+CREG: 0,2`
+(searching) and `+CSQ: 99,99` even while QMI shows the modem registered and
+calls work: the AT service on this modem does not track circuit-switched
+state. Telephony is on the QMI port. Do not diagnose call problems from this
+port, which is the mistake made here first.
 
 ## Microphones
 
