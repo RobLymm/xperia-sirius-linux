@@ -507,8 +507,19 @@ static int slim_tx_mixer_get(struct snd_kcontrol *kc,
 {
 	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kc);
 	struct wcd9320_codec *wcd = dev_get_drvdata(dapm->dev);
+	struct soc_mixer_control *mixer =
+			(struct soc_mixer_control *)kc->private_value;
 
-	ucontrol->value.integer.value[0] = wcd->tx_port_value;
+	/*
+	 * Report this port's own bit, not the whole set. Returning the shared
+	 * bitmask made every one of the ten "SLIM TXn" switches read as on as
+	 * soon as any single one was, so alsactl saved them all on and
+	 * restored them all on at the next boot. Every capture channel then
+	 * joined the interface's channel list, the DSP was handed ten channels
+	 * for a one channel stream, and it refused to start the port.
+	 */
+	ucontrol->value.integer.value[0] =
+		!!(wcd->tx_port_value & BIT(mixer->shift));
 
 	return 0;
 }
@@ -2289,6 +2300,10 @@ static const struct snd_kcontrol_new aif_cap_mixer[] = {
 			slim_tx_mixer_get, slim_tx_mixer_put),
 };
 
+static int wcd9320_slim_set_hw_params(struct wcd9320_codec *wcd,
+				      struct wcd_slim_codec_dai_data *dai_data,
+				      int direction);
+
 static int wcd9320_hw_params(struct snd_pcm_substream *substream,
 			   struct snd_pcm_hw_params *params,
 			   struct snd_soc_dai *dai)
@@ -2304,6 +2319,7 @@ static int wcd9320_hw_params(struct snd_pcm_substream *substream,
 	u16 rx_mix_1_reg_1, rx_mix_1_reg_2;
 	u16 rx_fs_reg;
 	u8 rx_mix_1_reg_1_val, rx_mix_1_reg_2_val;
+	int ret;
 
 	printk("taiko_hw_params\n");
 
@@ -2313,6 +2329,24 @@ static int wcd9320_hw_params(struct snd_pcm_substream *substream,
 	} while (rate != rates[rate_index] && ++rate_index);
 
 	printk("taiko_hw_params rate_index=%d\n", rate_index);
+
+	/*
+	 * Configure the SLIMbus side here rather than in prepare. The slave
+	 * port's watermark and enable have to be in place before the stream
+	 * is triggered: written in prepare they only took effect for the
+	 * *next* stream, so the first recording after a route was set came
+	 * back as silence and the second worked. Mainline's wcd9335 does it
+	 * from hw_params for the same reason.
+	 */
+	wcd->dai[dai->id].sconfig.bps = 16;
+	wcd->dai[dai->id].sconfig.rate = rate;
+	ret = wcd9320_slim_set_hw_params(wcd, &wcd->dai[dai->id],
+					 substream->stream);
+	if (ret) {
+		dev_err(component->dev,
+			"cannot set SLIMbus parameters: %d\n", ret);
+		return ret;
+	}
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 		/*
@@ -2452,7 +2486,22 @@ static int wcd9320_slim_set_hw_params(struct wcd9320_codec *wcd,
 		}
 	}
 
-	dai_data->sruntime = slim_stream_allocate(wcd->slim, "WCD9335-SLIM");
+	/*
+	 * One runtime per interface, allocated the first time it is needed.
+	 * Allocating a fresh one on every hw_params leaked the old one and
+	 * sometimes left a stream prepared against a runtime nothing would
+	 * disable again, which showed up as an occasional recording of
+	 * nothing at all.
+	 */
+	if (!dai_data->sruntime) {
+		dai_data->sruntime = slim_stream_allocate(wcd->slim,
+							  "WCD9320-SLIM");
+		if (IS_ERR(dai_data->sruntime)) {
+			ret = PTR_ERR(dai_data->sruntime);
+			dai_data->sruntime = NULL;
+			goto err;
+		}
+	}
 
 	return 0;
 
@@ -2464,13 +2513,36 @@ err:
 	return ret;
 }
 
+/*
+ * Turn the slave ports off again when a stream stops. Without this they stay
+ * enabled after the stream that configured them has gone, and the next
+ * stream's channel activation sometimes raced with the leftovers: a
+ * recording would come back as two seconds of exact zeros, with no error
+ * anywhere.
+ */
+static void wcd9320_slim_ports_disable(struct wcd9320_codec *wcd,
+				       struct wcd_slim_codec_dai_data *dai_data,
+				       int direction)
+{
+	struct wcd9320_slim_ch *ch;
+
+	list_for_each_entry(ch, &dai_data->slim_ch_list, list) {
+		if (direction == SNDRV_PCM_STREAM_PLAYBACK)
+			regmap_write(wcd->if_regmap,
+				     WCD9320_SLIM_PGD_RX_PORT_CFG(ch->port),
+				     SLAVE_PORT_DISABLE);
+		else
+			regmap_write(wcd->if_regmap,
+				     WCD9320_SLIM_PGD_TX_PORT_CFG(ch->port),
+				     SLAVE_PORT_DISABLE);
+	}
+}
+
 static int wcd9320_prepare(struct snd_pcm_substream *substream,
 			   struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
 	struct wcd9320_codec *wcd = snd_soc_component_get_drvdata(component);
-	struct wcd_slim_codec_dai_data *dai_data = &wcd->dai[dai->id];
-	int ret;
 
 	if (!wcd->clocks_started) {
 		/* central bandgap, then the clock buffers, once */
@@ -2498,14 +2570,7 @@ static int wcd9320_prepare(struct snd_pcm_substream *substream,
 				WCD9320_CDC_CLK_RX_B1_CTL, 0x03);
 	}
 
-	dai_data->sconfig.bps = 16;
-	dai_data->sconfig.rate = 48000;
-
-	ret = wcd9320_slim_set_hw_params(wcd, dai_data, substream->stream);
-	if (ret)
-		dev_err(component->dev, "cannot set SLIMbus parameters: %d\n", ret);
-
-	return ret;
+	return 0;
 }
 
 /*
@@ -2545,6 +2610,7 @@ static int wcd9320_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		slim_stream_disable(dai_data->sruntime);
 		slim_stream_unprepare(dai_data->sruntime);
+		wcd9320_slim_ports_disable(wcd, dai_data, substream->stream);
 		break;
 	default:
 		break;

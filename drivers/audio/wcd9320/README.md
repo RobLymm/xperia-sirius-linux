@@ -15,21 +15,44 @@ registers its DAIs and controls, and the whole playback path powers up:
 `AIF1 PB` through `SLIM RX1/RX2 MUX`, `RX1/RX2 MIX1`, `CLASS_H_DSM MUX` and
 `HPHL/HPHR DAC` to `HPHL`/`HPHR`.
 
-Capture is written, and the codec half of it is verified on hardware: with a
-route set from an analogue input through its converter, a decimator and a
-SLIMbus port, every widget from the input to `AIF1 CAP` powers up, the
-microphone bias and its capless filter switch on at the right voltages, the
-converter and decimator clocks run, the decimator is unmuted with its high
-pass at 150 Hz, and the codec reports the right SLIMbus channel. What does
-not work is the other end: the DSP refuses to start `SLIMBUS_0_TX`, returning
-`ADSP_EALREADY` from `AFE_PORT_CMD_DEVICE_START`, so the PCM cannot open.
+The handset microphone works. With a 1 kHz tone on the loudspeaker it
+records 16000 units of energy at 1 kHz and nothing at 1 kHz when the room is
+quiet. Four things had to be right, and three of them fail silently:
 
-Ruled out for that refusal: it happens on the first attempt of a clean boot,
-with only one call to `q6afe_port_start` (traced), with the card released from
-the sound server, with and without a playback stream already running, from
-either front end, and with the slave port configuration register at either of
-the two addresses the register map could mean. The playback direction of the
-same bus works throughout.
+1. **Each analogue input reaches one fixed converter, and each converter can
+   only be selected by certain decimators.** AMIC4, the handset microphone,
+   goes through ADC4, which only DEC3 and DEC10 can select. Pairing it with
+   the wrong decimator leaves the path disconnected and records silence with
+   no error anywhere.
+
+2. **The SLIMbus transmit switches all reported the same value.**
+   `slim_tx_mixer_get()` returned the whole shared bitmask rather than the
+   bit for its own port, so all ten "SLIM TXn" switches read as on as soon as
+   any one was. `alsactl` then saved them all on and restored them all on at
+   the next boot, every capture channel joined the interface's channel list,
+   and the DSP was handed ten channels for a one channel stream. It refused
+   the port with `ADSP_EALREADY`, which is what made this look like a DSP
+   problem rather than a channel map problem.
+
+3. **The SLIMbus parameters were set from `prepare`, not `hw_params`.** The
+   slave port's watermark and enable have to be in place before the stream is
+   triggered. Set in prepare they only took effect for the *next* stream, so
+   the first recording after a route was set came back silent. Mainline's
+   wcd9335 sets them from `hw_params`.
+
+4. **Both gains start at their minimum**, which reads as near silence.
+   `ADC4 Volume` and `DEC3 Volume` have to be raised.
+
+Capture also has to use the MultiMedia2 front end: MultiMedia1's playback and
+capture directions cannot both be open here.
+
+Still imperfect: roughly every other capture comes back as exact zeros, with
+no error logged and `slim_stream_prepare()` and `slim_stream_enable()` both
+returning success. The NGD controller logs "Sanity check failed" with message
+code 96 on every capture, working or not, so that is not the discriminator.
+`tools/mic-test.sh` records three times and reports each. And AMIC1, the
+secondary microphone, reads nothing yet while AMIC2 shows only its bias noise
+with no headset plugged in.
 
 There is no jack detection.
 
