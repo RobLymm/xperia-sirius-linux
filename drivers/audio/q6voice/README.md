@@ -222,6 +222,42 @@ amplifiers at the unused channel, and if a capture-to-loudspeaker loop is
 started *before* that is applied, the result is acoustic feedback at full
 volume. Apply the amplifier routing first.
 
+## The experiment that should come next
+
+Everything above varies one thing at a time inside a configuration that has
+never been shown to work, which is why it has produced so little. One
+question separates the two possible faults and has not been asked:
+
+**Does the transmit leg work at all, for any source?**
+
+The FM tuner provides a known-good audio source on a different transmit port:
+`SEC_MI2S_TX` (`0x1003`), which this phone already captures radio from. Point
+the voice processor's transmit port at it during a call with the radio playing
+(`tx_port=0x1003`) and listen at the far end.
+
+- If the far end hears the radio, the transmit leg works, and the fault is
+  specific to the microphone reaching `SLIMBUS_0_TX` — a codec and SLIMbus
+  problem, not a DSP one, and a much smaller search.
+- If the far end hears nothing, the transmit leg is broken whatever feeds it,
+  which makes the topology-and-calibration explanation above the live one and
+  says to stop looking at the codec.
+
+Either answer removes half the search space, which none of the tests so far
+has done. Worth one call before any more work.
+
+Two cheaper things to try first, both of which need no call:
+
+- **Scan the topology space.** Only `NONE` (`0x10F70`), `TX_SM_ECNS`
+  (`0x10F71`) and the V2 variants have been tried. `TX_DM_FLUENCE`
+  (`0x10F72`) has not, and the identifiers between `0x10F72` and `0x10F77`
+  are undocumented here. Which ones the DSP *accepts* can be discovered
+  without a call, by starting a session with `holdpcm` and reading the status
+  of `VSS_IVOCPROC_CMD_CREATE_FULL_CONTROL_SESSION_V2`. If any accepted TX
+  topology is a pass-through rather than an algorithm, it would need no
+  calibration.
+- **`VSS_IVOCPROC_CMD_SET_DEVICE_V2`** (`0x000112C6`), sent after enable.
+  Still untried, and the struct is known.
+
 ## Playing a recording into a call
 
 **This works.** It is a separate mechanism from the microphone and does not
