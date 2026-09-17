@@ -164,8 +164,7 @@ tell the voice processor how many channels each device has, and
 ## Playing a recording into a call
 
 **This works.** It is a separate mechanism from the microphone and does not
-depend on it. `tools/call-say.sh` is the whole thing wrapped up: give it a
-number and a sentence and it rings, waits for an answer, and speaks.
+depend on it. `tools/call-say.sh` exercises it end to end.
 
 One thing to know before turning it on permanently: the port it taps carries
 the downlink as well, so the far end may hear itself echoed. `call-say.sh`

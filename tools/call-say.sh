@@ -1,5 +1,9 @@
 #!/bin/sh
-# Ring a number and speak to whoever answers.
+# Play audio into a voice call.
+#
+# This exists to exercise the phone's in-call playback capability: audio
+# generated on the phone reaching the far end of a call. Text is spoken with
+# piper, or a wav file is played with -f.
 #
 # The audio goes into the call through the DSP's in-call playback, which mixes
 # an AFE port into the uplink. No microphone is involved. The phone's own
@@ -7,13 +11,15 @@
 # while both amplifiers are pointed at the right channel, which carries
 # nothing: the port still holds the audio for the DSP to take.
 #
-#   call-say.sh 07700900123 "Hello, this is Jarvis. The washing is done."
+#   call-say.sh 07700900123 "This is a test of the call audio path."
 #   call-say.sh 07700900123 -f /path/to/recording.wav
 #
 # Options:
 #   -r N   say it N times (default 1)
 #   -v V   piper voice name (default the southern English female one)
 #   -w N   seconds to wait for an answer (default 45)
+#
+# Playback starts as soon as the call goes active, with no lead-in.
 
 set -u
 
@@ -127,12 +133,11 @@ done
 [ "$ST" = active ] || { echo "no answer after ${WAIT}s"; exit 1; }
 
 echo "answered - speaking"
-sleep 2                       # let the far end settle before talking
 i=0
 while [ "$i" -lt "$REPEAT" ]; do
 	paplay --device="$SINK" "$WORK/left.wav" >/dev/null 2>&1
 	i=$((i + 1))
 	[ "$i" -lt "$REPEAT" ] && sleep 1
 done
-sleep 2                       # do not clip the end by hanging up too soon
+sleep 1                       # do not clip the end by hanging up too soon
 echo "done"
