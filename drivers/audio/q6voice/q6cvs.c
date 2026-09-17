@@ -10,6 +10,23 @@
 
 #define VSS_ISTREAM_CMD_CREATE_PASSIVE_CONTROL_SESSION	0x00011140
 
+/*
+ * In-call playback: the DSP reads audio from an AFE port and mixes it into
+ * the uplink, so the far end hears it. It never passes through a microphone,
+ * a codec or the loudspeaker, which is the point of it.
+ *
+ * The port is normally the AFE pseudoport 0x8005, which an ordinary playback
+ * stream is routed to; passing PORT_ID_DEFAULT asks the DSP to use that one.
+ * Made an argument because whether this DSP will tap an ordinary port is
+ * worth finding out before plumbing a pseudoport through q6afe and
+ * q6routing.
+ */
+#define VSS_IPLAYBACK_CMD_START				0x000112BD
+#define VSS_IPLAYBACK_CMD_STOP				0x00011239
+
+#define VSS_IPLAYBACK_PORT_ID_DEFAULT			0xFFFF
+#define VSS_IPLAYBACK_PORT_ID_VOICE			0x8005
+
 struct cvs_create_passive_control_session_cmd {
 	struct apr_hdr hdr;
 	char name[20];
@@ -33,6 +50,36 @@ struct q6voice_session *q6cvs_session_create(enum q6voice_path_type path)
 	return cvs;
 }
 EXPORT_SYMBOL_GPL(q6cvs_session_create);
+
+struct cvs_start_playback_cmd {
+	struct apr_hdr hdr;
+	u16 port_id;
+} __packed;
+
+int q6cvs_start_playback(struct q6voice_session *cvs, u16 port_id)
+{
+	struct cvs_start_playback_cmd cmd;
+
+	cmd.hdr.pkt_size = sizeof(cmd);
+	cmd.hdr.opcode = VSS_IPLAYBACK_CMD_START;
+	cmd.port_id = port_id;
+
+	pr_info("q6cvs: start in-call playback from port %#x\n", port_id);
+
+	return q6voice_common_send(cvs, &cmd.hdr);
+}
+EXPORT_SYMBOL_GPL(q6cvs_start_playback);
+
+int q6cvs_stop_playback(struct q6voice_session *cvs)
+{
+	struct apr_pkt cmd;
+
+	cmd.hdr.pkt_size = APR_HDR_SIZE;
+	cmd.hdr.opcode = VSS_IPLAYBACK_CMD_STOP;
+
+	return q6voice_common_send(cvs, &cmd.hdr);
+}
+EXPORT_SYMBOL_GPL(q6cvs_stop_playback);
 
 static int q6cvs_probe(struct apr_device *adev)
 {

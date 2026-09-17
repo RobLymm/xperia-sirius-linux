@@ -63,6 +63,16 @@ static bool unmute = true;
 module_param(unmute, bool, 0644);
 MODULE_PARM_DESC(unmute, "send an explicit unmute for both directions when a call starts");
 
+/*
+ * AFE port the DSP should mix into the uplink, so the far end hears audio
+ * this phone plays rather than what its microphone picks up. Needs
+ * attach_stream, because the command goes to a voice stream this side owns.
+ * Zero leaves in-call playback alone.
+ */
+static unsigned int playback_port;
+module_param(playback_port, uint, 0644);
+MODULE_PARM_DESC(playback_port, "AFE port to mix into the uplink (0xffff = the DSP default pseudoport, 0 = off)");
+
 static int q6voice_path_start(struct q6voice_path *p)
 {
 	struct device *dev = p->v->dev;
@@ -156,6 +166,14 @@ static int q6voice_path_start(struct q6voice_path *p)
 		ret = q6cvp_set_mute(cvp, false);
 		if (ret)
 			dev_err(dev, "failed to unmute: %d\n", ret);
+	}
+
+	/* Also not fatal: a call without it is still a call. */
+	if (playback_port && cvs) {
+		ret = q6cvs_start_playback(cvs, playback_port);
+		if (ret)
+			dev_err(dev, "failed to start in-call playback: %d\n",
+				ret);
 	}
 
 	return 0;

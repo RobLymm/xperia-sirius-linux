@@ -1,8 +1,17 @@
 # Call audio: the DSP's voice services
 
-**The downlink works. The uplink does not.** On a live call the caller's
-voice comes out of this phone. Nothing from this phone's microphone reaches
-the far end, and as far as is known it never has. An earlier version of this
+**The downlink works. The phone can play audio into a call. The microphone
+cannot.** On a live call the caller's voice comes out of this phone, and a
+recording played on this phone is heard by the far end. What does not work is
+the microphone: nothing it picks up reaches the far end, and as far as is
+known it never has.
+
+Those last two are different paths, which is the useful thing to know. The
+microphone reaches the far end through the voice processor's transmit device
+port, which is the part that does not work. Playing audio into a call uses
+the voice stream's in-call playback instead and touches neither the
+microphone, the codec, nor the SLIMbus transmit port. See "Playing a
+recording into a call" below. An earlier version of this
 file claimed both directions worked, on the strength of one call report that
 was later withdrawn; treat "it establishes" and "it carries audio" as
 entirely separate claims here, because this driver is very good at the first.
@@ -154,13 +163,39 @@ tell the voice processor how many channels each device has, and
 
 ## Playing a recording into a call
 
-Audio played out of the loudspeaker during a call does not reach the far end,
-and will not even once the uplink works: `TX_SM_ECNS` subtracts the
-loudspeaker's own output from the microphone signal, which is what stops the
-far end hearing itself. Sending a recording down the line is a separate
-feature needing the DSP's in-call playback command,
-`VSS_IPLAYBACK_CMD_START` on the voice stream. That requires an AP-side
-stream, which is why the `attach_stream` code is kept rather than deleted.
+**This works.** It is a separate mechanism from the microphone and does not
+depend on it.
+
+`VSS_IPLAYBACK_CMD_START` (`0x000112BD`) on the voice stream names an AFE
+port, and the DSP reads audio from that port and mixes it into the uplink.
+The payload is a single `u16` port id. It needs a voice stream this side
+owns, so `attach_stream=Y` as well.
+
+    echo Y      > /sys/module/q6voice/parameters/attach_stream
+    echo 0x1006 > /sys/module/q6voice/parameters/playback_port
+
+`0x1006` is `QUATERNARY_MI2S_RX`, the loudspeaker port. Anything played on
+the phone while a call is up is then heard by the far end. Note this is *not*
+the arrangement the command was designed for — Qualcomm's own use routes a
+playback stream to the AFE pseudoport `0x8005` and names that — but this DSP
+is perfectly willing to tap an ordinary port, which saves plumbing a
+pseudoport through `q6afe` and `q6routing`. The DSP accepts `0xFFFF`
+(meaning "use the default pseudoport"), `0x8005`, `0x1006` and `0x4001`
+alike, so acceptance proves nothing; `0x1006` is the one heard at the far
+end, because it is the only one of them that anything actually feeds.
+
+The drawback of using the loudspeaker port is that the phone's own speaker
+plays the recording too. The proper fix is the pseudoport, which nothing
+local consumes. Adding it means teaching `q6afe` that port `0x8005` exists
+and is started with `AFE_PSEUDOPORT_CMD_START` (`0x000100BF`) rather than
+`AFE_PORT_CMD_DEVICE_START`, giving it a DAI in `q6afe-dai`, and adding a
+back end link in the device tree.
+
+Note also that once the microphone path does work, playing audio out of the
+loudspeaker will *not* reach the far end by that route: `TX_SM_ECNS`
+subtracts the loudspeaker's own output from the microphone signal, which is
+what stops the far end hearing itself. In-call playback bypasses that, which
+is why it is the right mechanism for this rather than a workaround.
 
 ## Porting to 6.16
 
