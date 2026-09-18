@@ -6,12 +6,12 @@ next and what "done" means.
 
 ## 0. Before anything else
 
-- [ ] **Revert `voicehold.sh` to open both directions of the voice PCM.** It
+- [x] **Revert `voicehold.sh` to open both directions of the voice PCM.** It
       was left opening playback only, for an experiment that failed, and the
       driver waits for both by default — so as it stands a call has no
       downlink audio. One line: `sed -i 's|3600 playback|3600|'`, then
       restart `sirius-voicehold`.
-- [ ] **Get the CPU frequency work into the repository.** The state table
+- [x] **Get the CPU frequency work into the repository.** The state table
       says clock patches and an OPP table are prepared; they exist only on
       the phone. Anything not in the repository does not survive the phone.
 
@@ -22,11 +22,13 @@ Everything ruled out so far is in `../drivers/audio/q6voice/README.md`.
 
 Cheapest first, and the first two need no call:
 
-- [ ] **Scan the transmit topologies the DSP will accept.** Only `0x10F70`,
-      `0x10F71` and the V2 variants have been tried. Start a session with
-      `holdpcm` and read the status of the create command for each value from
-      `0x10F70` to `0x10F7F`. A pass-through topology, if one exists, would
-      need no calibration.
+- [x] **Scan the transmit topologies the DSP will accept.** Done: it accepts
+      `0x10F70` to `0x10F75` and rejects everything above, including
+      `0x10F77`, which confirms `RX_DEFAULT` is receive-only. So there are
+      **four accepted transmit topologies never tried for audio** —
+      `0x10F72` (`TX_DM_FLUENCE`), `0x10F73`, `0x10F74`, `0x10F75`. If any is
+      a pass-through it would need no calibration. Testing them for audio
+      needs a call, and that is the first thing to do with the next one.
 - [ ] **Send `VSS_IVOCPROC_CMD_SET_DEVICE_V2`** (`0x000112C6`) after enable.
       Untried; the structure is known.
 - [ ] **Ask whether the transmit leg works for any source at all.** Point the
@@ -52,9 +54,11 @@ handset, and can hear a person a metre away with the phone on a table.
 
 ## 2. Mobile data
 
-- [ ] Bring up a bearer and configure the interface. The modem registers,
-      carries calls and sends SMS, so this is a bearer and IP configuration,
-      not bring-up.
+- [x] Bring up a bearer and configure the interface. Done through
+      NetworkManager: `wwan0` gets an address and carries traffic, verified
+      bound to that interface. It runs on GPRS, which is slow; the modem
+      accepted a request to prefer faster modes but had not moved off GPRS
+      when last looked at.
 - [ ] Check it survives a modem restart and a reboot.
 
 **Done when** a browser loads a page over the cellular interface with Wi-Fi
@@ -110,10 +114,17 @@ phone is measurably cooler and longer-lived at rest.
 
 ## 5. Proximity
 
-- [ ] Characterise the TSL2772's near and far readings and calibrate the
-      offset with nothing in front of it.
-- [ ] Check something actually consumes it: `iio-sensor-proxy` has to be
-      present and the compositor has to blank on it.
+- [x] Characterise the sensor. It is an **APDS-9930**, not the TSL2772
+      whose module is also loaded. It reads 93-122 with nothing in front.
+- [x] Make something able to consume it. It needed no calibration: what was
+      missing was a `PROXIMITY_NEAR_LEVEL` udev property, without which
+      iio-sensor-proxy reported `HasProximity=false`. With
+      `userspace/udev/90-sirius-proximity.rules` it reports true, and near
+      and far both propagate, proved by moving the threshold below the noise
+      floor and watching "near" assert.
+- [ ] Check the threshold against a real face. It is set to 250 against a far
+      reading of 93-122, which is a guess until someone covers the sensor.
+- [ ] Check the screen actually blanks during a call.
 
 **Done when** the screen blanks when the phone is held to a face during a
 call and comes back when it is moved away, without dropping the call.
@@ -129,15 +140,20 @@ Not on the priority list above, but each has a known symptom.
 - [ ] **The touchscreen can go dead at the greeter**, needing a reboot.
 - [ ] **Applications rendering on the GPU hang it**, so everything runs on
       the software renderer and is slower than it should be.
-- [ ] **The dialler segfaults** — `gnome-calls`, inside a GObject signal
-      emission, repeatedly.
+- [x] **The dialler segfaults** — diagnosed: an upstream GTK bug, a NULL
+      toplevel dereferenced in `gdk_wayland_toplevel_remove_from_session`,
+      fixed in GTK 4.22.5. The phone has 4.22.4 and Alpine has not packaged
+      4.22.5 yet, so this is waiting on a package or a cross build of GTK.
 - [ ] **Capture returns exact zeros on some attempts**, with an identical
       driver trace on good and bad runs: a race in SLIMbus channel
       activation.
 - [ ] **The modem's registration module can still wedge.** One cause is
       fixed; whether it was the only one is unknown.
-- [ ] **Automatic brightness**: the light sensor reads 0 lux although the
-      device is present and its registers read correctly.
+- [x] **~~Automatic brightness: the light sensor reads 0 lux~~** — it does
+      not. The APDS-9930 reports 48-86 lux and follows the room. The zero was
+      SensorProxy's `LightLevel` property, which reads 0 until a client
+      claims the sensor. Whether anything actually drives the backlight from
+      it is a separate question, and untested.
 - [ ] **Headphone jack detection**: needs `CONFIG_REGMAP_IRQ` and the jack
       and button handling.
 - [ ] **Upstream what is not Z2 specific.** The q6afe clock fix, the sound

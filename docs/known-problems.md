@@ -119,6 +119,25 @@ the AFE port configured identically to an ordinary capture that records real
 audio at the same moment. See `../drivers/audio/q6voice/README.md`, which
 lists what else has been ruled out.
 
+## The dialler crashes when its window closes — an upstream GTK bug
+
+`gnome-calls` segfaults repeatedly. It is not a telephony fault and not
+this port's code:
+
+    #0  gdk_wayland_toplevel_remove_from_session (toplevel=0x0)
+          at ../gdk/wayland/gdktoplevel-wayland.c:2893
+    #1  gtk_application_window_removed (...)
+          at ../gtk/gtkapplication.c:556
+
+GTK passes a NULL toplevel and the Wayland backend dereferences it without a
+guard. It will hit any GTK 4 application whose window is destroyed before its
+surface is realised, so it is not specific to the dialler either.
+
+Known upstream and **fixed in GTK 4.22.5**. This phone has 4.22.4, and
+Alpine's edge/community has not yet packaged 4.22.5, so the fix is to wait
+for the package or rebuild GTK with the upstream patch. Building GTK on the
+device is impractical at 960 MHz; a cross build would be the sane route.
+
 ## Capture returns exact zeros on some attempts
 
 Recording from the handset microphone succeeds most of the time and
