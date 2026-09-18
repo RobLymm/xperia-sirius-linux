@@ -4,6 +4,13 @@ The ordered work, then the capability checklist to run once it is finished.
 `whats-left.md` says how big each item is and why; this file says what to do
 next and what "done" means.
 
+**Check the device before believing any of this.** Two entries were wrong for
+weeks in opposite directions — CPU scaling recorded as broken while the phone
+ran its full rated range, and the light sensor recorded as dead while it was
+reporting the room. The capability checklist at the end is also the way to
+re-verify the state table, and it is worth running periodically rather than
+only at the end.
+
 ## 0. Before anything else
 
 - [x] **Revert `voicehold.sh` to open both directions of the voice PCM.** It
@@ -54,17 +61,24 @@ handset, and can hear a person a metre away with the phone on a table.
 
 ## 2. Mobile data
 
-- [x] Bring up a bearer and configure the interface. Done through
-      NetworkManager: `wwan0` gets an address and carries traffic, verified
-      bound to that interface. It runs on GPRS, which is slow; the modem
-      accepted a request to prefer faster modes but had not moved off GPRS
-      when last looked at.
-- [ ] Check it survives a modem restart and a reboot.
+**Done.** A bearer comes up through NetworkManager, `wwan0` gets an address,
+and traffic was verified bound to that interface rather than by trusting the
+default route, which was still Wi-Fi. It reconnected by itself after a
+reboot, so autoconnect works.
 
-**Done when** a browser loads a page over the cellular interface with Wi-Fi
-switched off, and DNS resolves.
+- [ ] It runs on GPRS, which is slow. The modem accepted a request to prefer
+      faster modes but had not moved off GPRS. Worth finding out whether that
+      is coverage, the SIM, or the modem.
 
 ## 3. Camera
+
+One thing is now known that was not: the CCI control bus **is** in the booted
+device tree, with both its i2c buses, but carries `status = "disabled"`.
+Neither `I2C_QCOM_CCI` nor `MEDIA_SUPPORT` is built, and this kernel has no
+runtime device tree overlay support, so even reading the sensors' chip IDs
+needs a kernel rebuild and a flash. That makes stage 1 the gate for
+everything, including the cheap identification step.
+
 
 Staged in `camera-plan.md`. The stages are unchanged; the first needs a
 kernel rebuild, which nothing else here does.
