@@ -88,29 +88,18 @@ from the rear one.
 
 ## 4. CPU frequency scaling
 
-Two separate pieces, and the useful half does not need the hard one.
+**Done.** The full rated range works: 300 MHz to 2265.6 MHz on `cpufreq-dt`
+with schedutil, all four cores, 36-45 C under load. Verified with a timed
+workload — 25.2 s at the bottom against 4.6 s at the top — rather than by
+trusting `scaling_cur_freq`.
 
-The series is written and compiles; see `../drivers/cpufreq/`. It has never
-been booted, and it is not loadable modules, so it needs a boot image and a
-flash.
+Nothing needed flashing: the kernel already carried the patches, as
+`linux-postmarketos-qcom-msm8974` r10, and the device tree already had the
+nodes. This repository had it recorded as broken and as needing a driver that
+turned out to be written and working.
 
-- [ ] **Boot it and confirm the basics**: a `cpufreq` directory appears,
-      `scaling_available_frequencies` lists the points up to the cap, and
-      `scaling_cur_freq` drops at idle. That last one is the battery result
-      and is worth having on its own.
-- [ ] **Check the core really runs at the rate claimed**, with a timed
-      workload rather than by trusting the file, and that temperature under
-      sustained load stays sane.
-- [ ] **Then raise the cap.** Every operating point up to 2457.6 MHz is
-      already generated; those above 960 MHz carry `status = "disabled"`.
-      Enabling them depends on the supply patch doing what it says, which is
-      why the cap exists.
-- [ ] The patch header refers to a `gen-krait-opp.py` for regenerating the
-      table. It is not in the repository and was not on the device; either
-      write it or edit the operating points directly.
-
-**Done when** `scaling_cur_freq` moves with load, drops at idle, and the
-phone is measurably cooler and longer-lived at rest.
+- [ ] Worth a look anyway: whether the thermal trips are sensible under a
+      long sustained load, rather than the short one measured here.
 
 ## 5. Proximity
 

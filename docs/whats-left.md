@@ -26,16 +26,13 @@ obstacle to daily use. The wake path itself works (s2idle resumes on the
 power key), so this is driver resume paths rather than anything fundamental.
 Days.
 
-**CPU frequency and voltage scaling.** All four cores run at a fixed 960 MHz
-of the rated 2265.6 MHz. That is both a speed problem and a power problem:
-nothing ever clocks down when idle. A complete patch series exists in
-`../drivers/cpufreq/` and compiles: HFPLL data, a krait-cc fix, the device
-tree with an OPP table generated from Sony's factory data, and the supply.
-The supply turned out not to be the obstacle it was described as here: the
-four cores share one supply, ganged PM8841 phases reached over the L2 SAW,
-rather than per-core regulators, and a driver for it is written. Operating
-points above 960 MHz are generated but disabled until the supply path is
-proven on hardware. The remaining work is booting it, not writing it.
+**~~CPU frequency and voltage scaling~~** — works, across the full rated
+range. 300 MHz to 2265.6 MHz on `cpufreq-dt`, all four cores, verified with a
+timed workload rather than by reading a file. The supply that this document
+called an obstacle needing an unwritten driver is neither: the four cores
+share ganged PM8841 phases reached over the L2 SAW, and the driver for it is
+in `../drivers/cpufreq/` and demonstrably works, because nothing above
+960 MHz would run without it.
 
 **Touchscreen reliability.** The controller can stop responding entirely at
 the greeter, with no unlock gesture possible; a reboot recovers it. A phone

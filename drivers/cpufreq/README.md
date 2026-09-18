@@ -1,21 +1,21 @@
 # CPU frequency scaling on the Xperia Z2
 
-All four Krait cores run at a fixed 960 MHz of a rated 2265.6 MHz, because
-nothing in mainline instantiates the Krait clock controller: no ARM qcom
-device tree in 6.16 has a `krait-cc` node, a CPU OPP table or a `cpu-supply`,
-so every MSM8974 runs at whatever rate its bootloader left.
+**This works, across the full rated range.** 300 MHz to 2265.6 MHz on
+`cpufreq-dt` with the schedutil governor: all four cores reach the top under
+load and drop to 300 MHz at idle, at 36-45 C. Measured rather than assumed —
+the same timed workload takes 25.2 s at 300 MHz and 4.6 s at 2265.6 MHz, a
+5.5-fold difference, so the cores really do run at the rate the files claim.
 
-That is two problems, not one, and they are worth separating because the
-useful half is much easier than the other:
-
-- **Clocking down when idle** is what gives battery life. Nothing currently
-  drops below 960 MHz, so the phone burns the same power asleep as awake.
-- **Clocking up** toward 2265.6 MHz needs more core voltage.
+It needs these patches because nothing in mainline instantiates the Krait
+clock controller: no ARM qcom device tree in 6.16 has a `krait-cc` node, a
+CPU OPP table or a `cpu-supply`, so an unpatched MSM8974 runs at whatever
+rate its bootloader left, which on this phone is 960 MHz.
 
 ## What is here
 
-Four patches against 6.16.12 and one extra driver. They compile clean; none
-has been booted.
+Four patches against 6.16.12 and one extra driver, as carried in
+postmarketOS's `linux-postmarketos-qcom-msm8974` aport, where they are
+patches 0010 to 0013 alongside a CPU thermal trip and L2 cache scaling.
 
 **`0010-clk-qcom-hfpll-add-msm8974-data.patch`** — the HFPLL binding
 documents `qcom,msm8974-hfpll` but the driver has no match entry for it, so
@@ -68,39 +68,40 @@ register offsets for SAW2 v2.1 from msm-3.10, the configuration Sony's device
 tree writes, and the voltage encoding confirmed against the level echoed back
 in `PMIC_STS`.
 
-So the voltage path is written rather than missing. It is untested, which is
-a different thing.
+So the voltage path is neither missing nor per-core. And it works: the cores
+would not reach 2265.6 MHz without it, since every operating point above
+960 MHz needs more than the boot voltage.
 
-## The frequency cap, and raising it
+## The frequency cap
 
-The generated table contains every operating point from 300 MHz to
-2457.6 MHz, but everything above 960 MHz carries
-`status = "disabled";	/* above the safe rail cap */`. 960 MHz is the rate the
-cores already sustain, so the first version proves the supply path without
-anything running faster than it does today.
+The patch in this directory is the first version, which capped the table at
+960 MHz with `status = "disabled"` on everything above, so the supply path
+could be proven before anything ran faster. That cap has since been lifted:
+the phone offers all 28 operating points from 300 MHz to 2265.6 MHz. If you
+apply the patch as it stands you will get the capped table, and raising it
+means removing the `status` property from the operating points you want.
 
-Raising the cap means enabling those entries. The patch header refers to
-`cpufreq/gen-krait-opp.py --cap-hz` for regenerating the table; **that script
-is not in this repository and was not found on the device**, so for now the
-way to raise the cap is to remove the `status` property from the operating
-points wanted.
+The patch header refers to `cpufreq/gen-krait-opp.py --cap-hz` for
+regenerating the table; that script is not in this repository and was not
+found on the device.
 
-## Testing it
+## Checking it on a device
 
-Needs a boot image and a flash; none of it is a loadable module.
+None of this is a loadable module, so it needs a kernel built with:
 
     CONFIG_KRAITCC=y  QCOM_HFPLL=y  ARM_QCOM_CPUFREQ_NVMEM=y
     CONFIG_CPUFREQ_DT=y  QCOM_SPM=y  KRAIT_CLOCKS=y
 
-Then, in order:
+and a device tree carrying the nodes. Note that a boot image assembled from a
+separately built DTB will not have them unless that DTB was built from a
+patched tree, which is an easy way to have the drivers present and the
+scaling absent.
 
-1. `/sys/devices/system/cpu/cpu0/cpufreq/` exists at all.
-2. `scaling_available_frequencies` lists the points up to the cap.
-3. `scaling_cur_freq` drops at idle — this is the battery result, and it is
-   the one worth having even if nothing else follows.
-4. It rises under load, and the core actually runs at the rate claimed:
-   check against a timed workload rather than trusting the file.
-5. Temperature under sustained load stays sane.
+To check:
 
-Only then is raising the cap worth trying, because everything above 960 MHz
-depends on the supply patch doing what it says.
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+
+It should sit near the bottom at idle and reach the top under load. Verify
+the rate against a timed workload rather than trusting the file: the same
+loop should take several times longer pinned low than it does at the top.
