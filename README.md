@@ -58,7 +58,9 @@ the others listed there.
 | FM radio | Working | The tuner is inside the Broadcom Bluetooth chip, driven over HCI from userspace; audio arrives on the secondary MI2S port. The I2S link corrupts the sign bit of a burst of samples 41.6 times a second (chip and SoC bit clocks are independent); the `drivers/audio/fmrepair` ALSA plugin repairs it at the device layer. The app, [Robwatts FM Radio](https://github.com/RobLymm/robwatts-fm-radio), is published separately. `docs/fm-broadcom.md`, `drivers/audio/README.md` |
 
 `docs/whats-left.md` is the gap between this and a phone someone could use as
-their only phone, ordered by what blocks that.
+their only phone, ordered by what blocks that. `docs/todo.md` is the same
+work as an ordered list, with the capability checklist to run once it is
+done.
 
 Read `docs/known-problems.md` before relying on any of this. The two that
 matter most: applications rendering on the GPU hang it and can eventually
