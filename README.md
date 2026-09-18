@@ -4,6 +4,13 @@ Drivers, device trees and extracted hardware data for the Sony Xperia Z2
 (D6503, codename sirius, msm8974pro-AB), for anyone running a mainline-based
 Linux kernel on one.
 
+Calls, SMS, mobile data, Wi-Fi, Bluetooth, GNSS, FM radio, the display,
+touch, the sensors and the full 300 MHz to 2265.6 MHz range of all four CPU
+cores work. Audio works for the loudspeakers, earpiece, headphones and
+recording, and a call carries the caller's voice and anything the phone
+plays, but not yet what its microphone hears. The camera does not work at
+all, and suspend is off because resume loses Wi-Fi and touch.
+
 **If you have a Z2 and want it running like this one, start with
 [docs/from-stock-to-this.md](docs/from-stock-to-this.md).** It is the whole
 route from the Android the phone came with: unlocking the bootloader, what to
