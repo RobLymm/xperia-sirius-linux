@@ -40,7 +40,15 @@ the phone comes back unusable and looks like it has crashed. Turning suspend
 off in logind is a workaround, not a fix; the underlying problem is
 unaddressed.
 
-## Light sensor reads zero
+## ~~Light sensor reads zero~~ — it does not
+
+Recorded here for a long time as "binds but reports 0 lux". It does not: the
+APDS-9930 reports 48-86 lux and follows the room. The zero was
+`net.hadess.SensorProxy`'s `LightLevel` property, which reads 0 until a
+client claims the sensor. Reading the property without claiming looks
+exactly like a dead sensor.
+
+## Superseded: light sensor reads zero
 
 The APDS-9930 is present, binds and its registers can be read, but the
 illuminance channel reports 0 lux with both raw channels at zero. The

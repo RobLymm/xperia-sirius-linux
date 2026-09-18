@@ -1,0 +1,14 @@
+# Let iio-sensor-proxy use the Xperia Z2's proximity sensor.
+#
+# The kernel side works: the APDS-9930 reports through IIO and its readings
+# respond. What was missing is this property. Without it the daemon logs
+# "Found proximity sensor but no PROXIMITY_NEAR_LEVEL udev property" and
+# reports HasProximity=false, so nothing can blank the screen during a call.
+#
+# The value is the raw reading at or above which the sensor counts as
+# covered. With nothing in front of it this device reads 93-122, so the
+# threshold has to be clear of that; 250 is above the noise and below what
+# a face produces. Matching is on the device name because this driver
+# exposes in_proximity0_raw, with an index, and the rules shipped for other
+# devices test the unindexed in_proximity_raw and so would not match.
+ACTION=="add|change", SUBSYSTEM=="iio", ATTR{name}=="apds9930", ENV{PROXIMITY_NEAR_LEVEL}="250"
