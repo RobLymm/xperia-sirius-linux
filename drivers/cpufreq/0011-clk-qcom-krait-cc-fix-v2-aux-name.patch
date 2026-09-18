@@ -1,0 +1,33 @@
+From: Sirius port
+Subject: [PATCH 11/12] clk: qcom: krait-cc: fix the aux parent name on v2
+
+krait_cc_probe() registers the shared aux clock as "acpu_aux":
+
+	clk = clk_register_fixed_factor(dev, "acpu_aux", "gpll0_vote", 0, 1, 2);
+
+but krait_add_sec_mux() asks for it as "apu_aux" on the same path:
+
+	} else {
+		sec_mux_list[1].name = "apu_aux";
+	}
+
+The unique_aux branch above it (krait-cc-v1, which takes per-CPU aux clocks
+from the device tree) spells the name correctly, so only v2 is affected.
+With the name as it stands the secondary mux cannot resolve its second
+parent, which is the path the driver switches to while reprogramming an
+HFPLL.
+
+No in-tree device tree uses qcom,krait-cc-v1 or -v2 -- none defines the
+clock controller at all -- so this has not been reachable until now.
+
+--- a/drivers/clk/qcom/krait-cc.c
++++ b/drivers/clk/qcom/krait-cc.c
+@@ -191,7 +191,7 @@ krait_add_sec_mux(struct device *dev, int id, const char *s,
+ 		sec_mux_list[1].fw_name = parent_name;
+ 		sec_mux_list[1].name = parent_name;
+ 	} else {
+-		sec_mux_list[1].name = "apu_aux";
++		sec_mux_list[1].name = "acpu_aux";
+ 	}
+ 
+ 	ret = devm_clk_hw_register(dev, &mux->hw);

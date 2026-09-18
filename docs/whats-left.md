@@ -28,11 +28,14 @@ Days.
 
 **CPU frequency and voltage scaling.** All four cores run at a fixed 960 MHz
 of the rated 2265.6 MHz. That is both a speed problem and a power problem:
-nothing ever clocks down when idle. An OPP table and clock patches for
-300–960 MHz at the present voltage are prepared. Going above 960 MHz needs
-higher CPU voltage, which needs a driver for the Krait per-core regulators on
-the PM8841 that mainline does not have. Days for the low half; weeks and a
-new regulator driver for the full range.
+nothing ever clocks down when idle. A complete patch series exists in
+`../drivers/cpufreq/` and compiles: HFPLL data, a krait-cc fix, the device
+tree with an OPP table generated from Sony's factory data, and the supply.
+The supply turned out not to be the obstacle it was described as here: the
+four cores share one supply, ganged PM8841 phases reached over the L2 SAW,
+rather than per-core regulators, and a driver for it is written. Operating
+points above 960 MHz are generated but disabled until the supply path is
+proven on hardware. The remaining work is booting it, not writing it.
 
 **Touchscreen reliability.** The controller can stop responding entirely at
 the greeter, with no unlock gesture possible; a reboot recovers it. A phone

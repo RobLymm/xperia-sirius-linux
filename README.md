@@ -53,7 +53,7 @@ the others listed there.
 | Calls | Working except the microphone | A call can be placed and answered, the caller's voice comes out of the phone, and audio generated on the phone reaches the far end through the DSP's in-call playback, with the phone's own loudspeaker silent (`tools/call-say.sh`). What does not work is the microphone: nothing it picks up reaches the far end. Voice audio goes through the DSP, and mainline has no driver for its voice services, so one is ported and adapted here; it needs no calibration data, which was the surprise. The uplink is unsolved, and `drivers/audio/q6voice/README.md` records what has been eliminated. `drivers/audio/q6voice/` |
 | USB-OTG | Not tested | The USB controller is in OTG mode and the PM8941 ID detection is present; host mode has not been tried |
 | NFC | Not tested | NXP PN547. The mainline driver supports it and a device tree node is written but has not been flashed. `docs/nfc.md` |
-| CPU frequency and voltage scaling | Not working, in progress | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because there is no cpufreq driver. Clock patches and an OPP table from Sony's factory data are prepared for 300–960 MHz at the present voltage. Frequencies above 960 MHz need higher CPU voltage, which needs a driver for the Krait per-core regulators on PM8841 that mainline does not have |
+| CPU frequency and voltage scaling | Not working, written but never booted | All four cores run at a fixed 960 MHz of the rated 2265.6 MHz, because nothing in mainline instantiates the Krait clock controller. A complete patch series is in `drivers/cpufreq/`: HFPLL data, a krait-cc fix, the device tree with an OPP table generated from Sony's factory data, and the supply. The four cores share one supply — ganged PM8841 phases reached over the L2 SAW, not per-core regulators — and a driver for it is written. Operating points above 960 MHz are present but disabled until the supply path is proven. It compiles; it has never been booted |
 | Suspend and resume | Not working | Resume loses Wi-Fi and touch, so suspend is turned off. `docs/known-problems.md` |
 | FM radio | Working | The tuner is inside the Broadcom Bluetooth chip, driven over HCI from userspace; audio arrives on the secondary MI2S port. The I2S link corrupts the sign bit of a burst of samples 41.6 times a second (chip and SoC bit clocks are independent); the `drivers/audio/fmrepair` ALSA plugin repairs it at the device layer. The app, [Robwatts FM Radio](https://github.com/RobLymm/robwatts-fm-radio), is published separately. `docs/fm-broadcom.md`, `drivers/audio/README.md` |
 
@@ -74,6 +74,7 @@ registers read fine.
     drivers/audio/      ASoC machine driver for the msm8974 sound card
     drivers/audio/fmrepair/  ALSA plugin: repairs the FM capture's periodic sign-bit bursts (device sirius_fm)
     drivers/battery/    VADC scaling and OCV capacity estimation patches
+    drivers/cpufreq/    Krait clocks, OPP tables and the shared CPU supply
     drivers/fm/         V4L2 driver for WCNSS FM tuners (other msm8974 phones,
                         not the Z2)
     panel-variants/     the six panel configurations extracted from stock,

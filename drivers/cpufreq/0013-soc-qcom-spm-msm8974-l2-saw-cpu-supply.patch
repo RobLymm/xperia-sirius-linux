@@ -1,0 +1,246 @@
+From: Sirius port
+Subject: [PATCH 13/13] soc: qcom: spm: drive the MSM8974 Krait supply from the L2 SAW
+
+On MSM8974 the four Krait cores share one supply: ganged PM8841 FTS phases,
+reached over SPMI by the L2 SAW2, which Qualcomm's downstream tree marks as
+the APCS master (qcom,L2-spm-is-apcs-master). Voltage, phase count and
+PWM/PFM mode are all sent through that SAW's VCTL register. Mainline has the
+SPM regulator framework, but only the APQ8064 SAW2 v1.1 implements set_vdd,
+the msm8974 L2 compatible has no match entry, and spm_get_cpu() rejects any
+SAW that no CPU references through qcom,saw.
+
+Add the MSM8974 L2 SAW as a regulator:
+
+  - register offsets for SAW2 v2.1 from msm-3.10 spm-v2.c: PMIC_STS 0x14,
+    RST 0x18, VCTL 0x1c, PMIC_DATA_3 0x4c
+  - CFG 0x14, PMIC_DATA_0 0x02030080, PMIC_DATA_1 0x00030000, as written by
+    Sony's Xperia Z2 device tree (qcom,spm@f9012000)
+  - voltage: level = uV / 5 mV into VCTL port 0 and PMIC_DATA_3, confirmed
+    by the level echoed back in PMIC_STS (downstream set_pmic_gang_voltage
+    and msm_spm_drv_set_vctl2)
+  - at probe, before the initial voltage: PWM mode on port 2 and all four
+    phases on port 1. Downstream scales both with load; holding them costs
+    idle power but cannot starve the cores at the top operating points
+  - initial voltage 900 mV, downstream's CORE_VOLTAGE_BOOTUP
+  - an APCS master is not bound to a CPU, so its writes run on CPU0
+
+Also skip the sequence write for a SAW with no SEQ_ENTRY offset. Offset 0
+is the start of the control registers, which the unguarded copy would
+otherwise zero.
+
+Measured on a Z2 before this change: every core reports APC_PWR_GATE_CTL
+0x403f3f7f (BHS enabled on all segments, LDO bypassed and powered down), so
+core voltage follows this rail directly. The L2 SAW reads version
+0x20010000 (v2.1) with the PMIC-arbiter bit set in ID.
+
+--- a/drivers/soc/qcom/spm.c
++++ b/drivers/soc/qcom/spm.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include <linux/bitfield.h>
++#include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
+ #include <linux/io.h>
+@@ -55,6 +56,7 @@
+ 	SPM_REG_AVS_CTL,
+ 	SPM_REG_AVS_LIMIT,
+ 	SPM_REG_RST,
++	SPM_REG_PMIC_DATA_3,
+ 	SPM_REG_NR,
+ };
+ 
+@@ -73,6 +75,11 @@
+ 	u8 start_index[PM_SLEEP_MODE_NR];
+ 
+ 	smp_call_func_t set_vdd;
++	/*
++	 * The SAW drives the shared CPU supply rather than one core's, so it is
++	 * not bound to a CPU through qcom,saw (MSM8974 L2 SAW, APCS master).
++	 */
++	bool apcs_master;
+ 	/* for now we support only a single range */
+ 	struct linear_range *range;
+ 	unsigned int ramp_delay;
+@@ -218,6 +225,61 @@
+ 	.start_index[PM_SLEEP_MODE_SPC] = 5,
+ };
+ 
++/*
++ * MSM8974 L2 SAW2 v2.1. On this SoC the L2 SAW is the APCS master: it owns the
++ * SPMI channel to the ganged PM8841 FTS phases that supply all four Krait
++ * cores, and voltage, phase count and PWM/PFM mode are all sent through its
++ * VCTL register. Offsets and values follow Qualcomm's msm-3.10 spm-v2.c and
++ * the qcom,spm@f9012000 node in Sony's Xperia Z2 device tree. SPM_CTL and
++ * SEQ_ENTRY are deliberately absent: L2 low-power sequencing is not used.
++ */
++static const u16 spm_reg_offset_v2_1_l2[SPM_REG_NR] = {
++	[SPM_REG_CFG]		= 0x08,
++	[SPM_REG_PMIC_STS]	= 0x14,
++	[SPM_REG_RST]		= 0x18,
++	[SPM_REG_VCTL]		= 0x1C,
++	[SPM_REG_AVS_CTL]	= 0x20,
++	[SPM_REG_DLY]		= 0x34,
++	[SPM_REG_PMIC_DATA_0]	= 0x40,
++	[SPM_REG_PMIC_DATA_1]	= 0x44,
++	[SPM_REG_PMIC_DATA_3]	= 0x4C,
++};
++
++#define SPM_8974_VCTL_DATA		GENMASK(7, 0)
++#define SPM_8974_VCTL_PORT		GENMASK(18, 16)
++#define SPM_8974_PMIC_STS_DATA		GENMASK(7, 0)
++#define SPM_8974_PMIC_STS_STATE		GENMASK(17, 16)
++#define SPM_8974_PORT_VCTL		0
++#define SPM_8974_PORT_PHASE		1
++#define SPM_8974_PORT_PFM		2
++#define SPM_8974_FTS_MODE_PWM		0x80
++/* the PMIC runs one phase more than the value written */
++#define SPM_8974_GANG_PHASES		4
++
++static void smp_set_vdd_8974_l2(void *data);
++static void smp_init_pmic_8974_l2(void *data);
++
++/*
++ * The selector is the level byte sent to the PMIC: 5 mV per step from 0 V,
++ * as downstream krait-regulator.c computes it (DIV_ROUND_UP(uV, 5000)).
++ */
++static struct linear_range spm_8974_l2_regulator_range =
++	REGULATOR_LINEAR_RANGE(350000, 70, 255, 5000);
++
++static const struct spm_reg_data spm_reg_8974_l2 = {
++	.reg_offset = spm_reg_offset_v2_1_l2,
++	.spm_cfg = 0x14,
++	.spm_dly = 0x3C102800,
++	.pmic_data[0] = 0x02030080,
++	.pmic_data[1] = 0x00030000,
++	.set_vdd = smp_set_vdd_8974_l2,
++	.apcs_master = true,
++	.range = &spm_8974_l2_regulator_range,
++	/* downstream CORE_VOLTAGE_BOOTUP; above anything the cores need at boot */
++	.init_uV = 900000,
++	.ramp_delay = 1250,
++};
++
+ static const u16 spm_reg_offset_v1_1[SPM_REG_NR] = {
+ 	[SPM_REG_CFG]		= 0x08,
+ 	[SPM_REG_STS0]		= 0x0c,
+@@ -326,6 +388,67 @@
+ 	.set_voltage_time_sel	= regulator_set_voltage_time_sel,
+ };
+ 
++static int spm_8974_l2_send(struct spm_driver_data *drv, unsigned int port,
++			    unsigned int val)
++{
++	u32 vctl, sts;
++
++	vctl = spm_register_read(drv, SPM_REG_VCTL);
++	vctl = FIELD_SET(vctl, SPM_8974_VCTL_DATA, val);
++	vctl = FIELD_SET(vctl, SPM_8974_VCTL_PORT, port);
++	spm_register_write(drv, SPM_REG_VCTL, vctl);
++
++	if (port == SPM_8974_PORT_VCTL) {
++		u32 data3 = spm_register_read(drv, SPM_REG_PMIC_DATA_3);
++
++		data3 = FIELD_SET(data3, SPM_8974_VCTL_DATA, val);
++		data3 = FIELD_SET(data3, SPM_8974_VCTL_PORT, port);
++		spm_register_write(drv, SPM_REG_PMIC_DATA_3, data3);
++
++		/* PMIC_STS echoes the level only for port 0 */
++		return read_poll_timeout_atomic(spm_register_read, sts,
++				FIELD_GET(SPM_8974_PMIC_STS_DATA, sts) == val,
++				1, 200, false, drv, SPM_REG_PMIC_STS);
++	}
++
++	/* other ports: wait for the PMIC state machine to return to idle */
++	return read_poll_timeout_atomic(spm_register_read, sts,
++			FIELD_GET(SPM_8974_PMIC_STS_STATE, sts) == 0,
++			1, 200, false, drv, SPM_REG_PMIC_STS);
++}
++
++static void smp_init_pmic_8974_l2(void *data)
++{
++	struct spm_driver_data *drv = data;
++
++	/*
++	 * Downstream switches between PFM, AUTO and PWM and scales the phase
++	 * count with load. Hold the rail in PWM with every phase instead: it
++	 * costs idle power but never starves the cores of current at the top
++	 * operating points.
++	 */
++	if (spm_8974_l2_send(drv, SPM_8974_PORT_PFM, SPM_8974_FTS_MODE_PWM))
++		dev_err(drv->dev, "timeout setting PWM mode\n");
++	udelay(50);
++
++	if (spm_8974_l2_send(drv, SPM_8974_PORT_PHASE, SPM_8974_GANG_PHASES - 1))
++		dev_err(drv->dev, "timeout setting the phase count\n");
++	udelay(50);
++}
++
++static void smp_set_vdd_8974_l2(void *data)
++{
++	struct spm_driver_data *drv = data;
++	unsigned int vlevel = drv->volt_sel;
++
++	/* Kick the state machine back to idle */
++	spm_register_write(drv, SPM_REG_RST, 1);
++
++	if (spm_8974_l2_send(drv, SPM_8974_PORT_VCTL, vlevel))
++		dev_err_ratelimited(drv->dev, "timeout setting the voltage (level %#x)!\n",
++				    vlevel);
++}
++
+ static void smp_set_vdd_v1_1(void *data)
+ {
+ 	struct spm_driver_data *drv = data;
+@@ -441,10 +564,18 @@
+ 	rdesc->ramp_delay = drv->reg_data->ramp_delay;
+ 
+ 	ret = spm_get_cpu(dev);
+-	if (ret < 0)
+-		return ret;
++	if (ret < 0) {
++		if (!drv->reg_data->apcs_master)
++			return ret;
++		/* the APCS master's registers are not per-core */
++		ret = 0;
++	}
+ 
+ 	drv->reg_cpu = ret;
++
++	if (drv->reg_data->apcs_master)
++		smp_call_function_single(drv->reg_cpu, smp_init_pmic_8974_l2,
++					 drv, true);
+ 	dev_dbg(dev, "SAW2 bound to CPU %d\n", drv->reg_cpu);
+ 
+ 	/*
+@@ -489,6 +620,8 @@
+ 	  .data = &spm_reg_8939_cpu },
+ 	{ .compatible = "qcom,msm8974-saw2-v2.1-cpu",
+ 	  .data = &spm_reg_8974_8084_cpu },
++	{ .compatible = "qcom,msm8974-saw2-v2.1-l2",
++	  .data = &spm_reg_8974_l2 },
+ 	{ .compatible = "qcom,msm8976-gold-saw2-v2.3-l2",
+ 	  .data = &spm_reg_8976_gold_l2 },
+ 	{ .compatible = "qcom,msm8976-silver-saw2-v2.3-l2",
+@@ -527,10 +660,16 @@
+ 	drv->dev = &pdev->dev;
+ 	platform_set_drvdata(pdev, drv);
+ 
+-	/* Write the SPM sequences first.. */
+-	addr = drv->reg_base + drv->reg_data->reg_offset[SPM_REG_SEQ_ENTRY];
+-	__iowrite32_copy(addr, drv->reg_data->seq,
+-			ARRAY_SIZE(drv->reg_data->seq) / 4);
++	/*
++	 * Write the SPM sequences first.. A SAW without a sequence table (the
++	 * MSM8974 L2 APCS master) must not have zeroes written over its
++	 * control registers at offset 0.
++	 */
++	if (drv->reg_data->reg_offset[SPM_REG_SEQ_ENTRY]) {
++		addr = drv->reg_base + drv->reg_data->reg_offset[SPM_REG_SEQ_ENTRY];
++		__iowrite32_copy(addr, drv->reg_data->seq,
++				ARRAY_SIZE(drv->reg_data->seq) / 4);
++	}
+ 
+ 	/*
+ 	 * ..and then the control registers.

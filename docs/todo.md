@@ -86,12 +86,24 @@ from the rear one.
 
 Two separate pieces, and the useful half does not need the hard one.
 
-- [ ] **Up to 960 MHz**, at the voltage the cores already run at: a cpufreq
-      driver and an OPP table. This is the part that gives battery life,
-      because nothing currently clocks down when idle.
-- [ ] **Above 960 MHz**, toward the rated 2265.6 MHz: needs more core
-      voltage, which needs a driver for the Krait per-core regulators on the
-      PM8841 that mainline does not have.
+The series is written and compiles; see `../drivers/cpufreq/`. It has never
+been booted, and it is not loadable modules, so it needs a boot image and a
+flash.
+
+- [ ] **Boot it and confirm the basics**: a `cpufreq` directory appears,
+      `scaling_available_frequencies` lists the points up to the cap, and
+      `scaling_cur_freq` drops at idle. That last one is the battery result
+      and is worth having on its own.
+- [ ] **Check the core really runs at the rate claimed**, with a timed
+      workload rather than by trusting the file, and that temperature under
+      sustained load stays sane.
+- [ ] **Then raise the cap.** Every operating point up to 2457.6 MHz is
+      already generated; those above 960 MHz carry `status = "disabled"`.
+      Enabling them depends on the supply patch doing what it says, which is
+      why the cap exists.
+- [ ] The patch header refers to a `gen-krait-opp.py` for regenerating the
+      table. It is not in the repository and was not on the device; either
+      write it or edit the operating points directly.
 
 **Done when** `scaling_cur_freq` moves with load, drops at idle, and the
 phone is measurably cooler and longer-lived at rest.
