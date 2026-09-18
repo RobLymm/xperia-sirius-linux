@@ -146,6 +146,7 @@ struct wcd9320_slim_ch {
 };
 
 struct wcd_slim_codec_dai_data {
+	bool stream_up;
 	struct list_head slim_ch_list;
 	struct slim_stream_config sconfig;
 	struct slim_stream_runtime *sruntime;
@@ -2520,6 +2521,30 @@ err:
  * recording would come back as two seconds of exact zeros, with no error
  * anywhere.
  */
+/*
+ * Disabling the slave ports when a stream stops was added to fix a recording
+ * that came back as exact zeros. It is under a parameter because it is now a
+ * suspect for the fault that replaced it: every other capture is silent,
+ * deterministically, with identical driver logs on the good and silent runs.
+ * That is what a channel deactivation landing one reconfiguration late would
+ * look like.
+ */
+/*
+ * Whether to tear the SLIMbus stream down when a capture or playback stops.
+ *
+ * Tearing it down and building it again for every stream is what the
+ * alternating-silence fault tracks: the channel is deactivated and
+ * reactivated, and the reconfiguration appears to land a stream late. Held
+ * open, the channel stays active and each stream simply reads it.
+ */
+static bool keep_stream = false;
+module_param(keep_stream, bool, 0644);
+MODULE_PARM_DESC(keep_stream, "hold the SLIMbus stream open between streams");
+
+static bool disable_ports_on_stop = true;
+module_param(disable_ports_on_stop, bool, 0644);
+MODULE_PARM_DESC(disable_ports_on_stop, "disable the SLIMbus slave ports when a stream stops");
+
 static void wcd9320_slim_ports_disable(struct wcd9320_codec *wcd,
 				       struct wcd_slim_codec_dai_data *dai_data,
 				       int direction)
@@ -2594,6 +2619,9 @@ static int wcd9320_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (keep_stream && dai_data->stream_up)
+			break;
+
 		ret = slim_stream_prepare(dai_data->sruntime, &dai_data->sconfig);
 		if (ret) {
 			dev_err(component->dev,
@@ -2604,13 +2632,21 @@ static int wcd9320_trigger(struct snd_pcm_substream *substream, int cmd,
 		if (ret)
 			dev_err(component->dev,
 				"cannot enable SLIMbus stream: %d\n", ret);
+		else
+			dai_data->stream_up = true;
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		if (keep_stream)
+			break;
+
 		slim_stream_disable(dai_data->sruntime);
 		slim_stream_unprepare(dai_data->sruntime);
-		wcd9320_slim_ports_disable(wcd, dai_data, substream->stream);
+		dai_data->stream_up = false;
+		if (disable_ports_on_stop)
+			wcd9320_slim_ports_disable(wcd, dai_data,
+						   substream->stream);
 		break;
 	default:
 		break;

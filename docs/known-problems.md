@@ -146,11 +146,38 @@ exactly zero, no error anywhere. Six consecutive two-second recordings gave
 190, 0, 186, 0, 194, 0; a later four gave 193, 187, 166, 0. So it is not a
 strict alternation.
 
-The driver's trace is identical on a good run and a zero run — same channel
-(`ch 134 6 6`), same AFE port configuration — so nothing is being configured
-differently. That points at a race in SLIMbus channel activation rather than
-a wrong value, which matches the comments already in `wcd9320.c` about
-leftovers from a previous stream. Unfixed.
+It is not a race, and not timing. Twenty one-second captures give ten good
+and ten silent, strictly alternating, and the rate is identical with a
+0.3 second gap and with a 3 second gap. Something has two states and flips
+on each stream.
+
+The driver's trace is identical on a good run and a silent one — same channel
+(`ch 134 6 6`), same AFE port configuration — and so is the SLIMbus log with
+dynamic debug on `slim_qcom_ngd_ctrl` and the SLIMbus core: thirty lines
+each, no difference. The commands issued are the same; only the result
+differs.
+
+Two explanations have been tested and both are wrong, which is worth
+recording so they are not tried again. `wcd9320.c` now carries a parameter
+for each:
+
+| `disable_ports_on_stop` | `keep_stream` | good / silent out of 20 |
+|---|---|---|
+| Y (default) | N (default) | 11 / 9 |
+| N | N | 12 / 8 |
+| Y | Y | 1 / 19 |
+| N | Y | 0 / 20 |
+
+- **Disabling the slave ports on stop is not the cause.** It was added to fix
+  an earlier all-zeros fault and was the obvious suspect for causing this
+  one. Turning it off changes nothing beyond noise.
+- **Holding the SLIMbus stream open between streams makes it far worse**, not
+  better. With the stream held up, capture almost never works. So the
+  teardown and rebuild is what makes data flow at all, and the theory that
+  the channel activation lands one reconfiguration late is wrong: without a
+  fresh activation there is no data whatsoever.
+
+Whatever alternates is below the level the driver can see. Unfixed.
 
 ## Microphones
 
