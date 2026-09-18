@@ -35,10 +35,84 @@ for compositor use.
 
 ## Suspend and resume
 
-Disabled deliberately. Resume does not restore Wi-Fi or the touchscreen, so
-the phone comes back unusable and looks like it has crashed. Turning suspend
-off in logind is a workaround, not a fix; the underlying problem is
-unaddressed.
+Suspend itself works. It was recorded here as broken, but `suspend.target`
+and `sleep.target` were simply **masked**, which is why the kernel's suspend
+counters read zero attempts. Writing `freeze` to `/sys/power/state` suspends
+and resumes correctly, and the kernel reports success. What made it look
+fatal is two drivers that do not come back.
+
+### Nothing but the power key can wake it
+
+There is no remote wake source at all. The Broadcom chip answers "Not
+supported" when asked about wake-on-wireless, the RTC alarm does not wake
+s2idle, the USB gadget goes down with everything else, and enabling the
+`smp2p-modem` wake flag did not make an incoming call rouse the phone. So a
+suspended phone cannot be reached over Wi-Fi, over mobile data, or by ringing
+it, and suspend cannot be tested unattended.
+
+That last one matters for using this as a phone: a handset that cannot be
+rung while asleep is not much of a handset, and it is the reason suspend is
+not simply switched on and left on.
+
+### Wi-Fi does not survive it — fixed with a workaround
+
+On suspend:
+
+    brcmfmac: brcmf_ops_sdio_suspend: Failed to set pm_flags 1
+    WARNING: at drivers/mmc/core/sdio.c:1044 mmc_sdio_suspend
+
+The driver asks the SDIO host to keep the card powered, with
+`MMC_PM_KEEP_POWER`, and the host does not support it. The chip therefore
+loses power, and on resume the driver cannot reach it:
+
+    brcmf_sdio_bus_sleep: error while changing bus sleep state -110
+    brcmf_sdio_dpc: failed backplane access over SDIO, halting operation
+
+Unbinding and rebinding the host controller re-detects the card and makes
+brcmfmac download the firmware again, which brings the interface back with
+its connection intact. `../userspace/udev/` has the sleep hook that does it.
+
+The proper fix is `keep-power-in-suspend` on the Wi-Fi mmc node
+(`f9864900.mmc`, which is mmc2 — `f9824900.mmc` is the eMMC and must not be
+touched). That is a device tree change and so needs a new boot image.
+
+### The touchscreen does not survive it
+
+`suspend()` calls `set_suspend_mode()`, which puts the controller into sleep
+mode. Nothing ever took it out again: the only caller of `set_resume_mode()`
+was a framebuffer blank notifier, and that whole block is compiled out behind
+`#if 0`. So every suspend since this port began put the touchscreen to sleep
+permanently. The symptom is a device that is still listed in
+`/proc/bus/input/devices` with its interrupt intact, and completely
+unresponsive — the interrupt count does not move when the screen is touched.
+
+Calling `set_resume_mode()` from the driver's resume is necessary and **not
+sufficient**. With it in place the function runs, and the controller still
+reports nothing. What is known after that:
+
+- The chip answers on I2C perfectly well afterwards — `chip_id` 0x78,
+  firmware 1.30.60, `config_id` 0x048D all read back.
+- `enable_resume_por` is 1 in the device tree, so resume takes the
+  power-on-reset path rather than the software one. Forcing that reset
+  through the `por` sysfs entry reports `irq reset timeout`: the reset
+  interrupt never arrives, and the driver's `reset_sem` is left held.
+- Sending the software wake sequence by hand through the `command` entry —
+  `SET_POWER_MODE`/`ACTIVE_MODE` then `SET_TOUCH_RPT_MODE` — does not revive
+  it either.
+
+So the controller is awake on the bus and not scanning, and neither the reset
+path nor the command path restores it. Unsolved.
+
+### The touch driver could not be re-probed at all — fixed
+
+Recovering by reloading the driver was impossible: the i2c driver had
+`.probe` and `.shutdown` but **no `.remove`**, so unbinding freed nothing.
+The interrupt GPIO and the input device leaked, and any second probe failed
+with `GPIO request failed for max1187x_tirq`. Its existing `shutdown()` is
+already a complete teardown — sysfs, interrupt, input device, GPIOs,
+regulators — and has the same signature as `remove()`. Wiring it up makes
+unbind and rebind work cleanly, which gives the sleep hook a way to bring the
+touchscreen back even though the driver's own resume cannot.
 
 ## ~~Light sensor reads zero~~ — it does not
 

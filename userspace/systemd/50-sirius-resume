@@ -1,0 +1,42 @@
+#!/bin/sh
+# Bring the Wi-Fi chip and the touchscreen back after resume.
+#
+# Wi-Fi: the SDIO host will not keep the BCM4335 powered across suspend --
+# brcmfmac asks for MMC_PM_KEEP_POWER and is refused, which also trips a
+# WARNING in mmc_sdio_suspend. The chip loses power, and on resume the driver
+# cannot reach it ("failed backplane access over SDIO, halting operation")
+# and gives up. Rebinding the host controller re-detects the card and makes
+# brcmfmac download the firmware again.
+#
+# Touch: suspend() puts the controller into sleep mode, and nothing wakes it.
+# Calling set_resume_mode() from the driver's resume, which was missing
+# entirely, is not enough on its own: the controller still answers on I2C but
+# reports no touches, and a forced power-on reset times out waiting for the
+# reset interrupt. Re-probing the driver does work, so that is what this
+# does.
+#
+# Both are workarounds. The Wi-Fi one wants keep-power-in-suspend on the
+# mmc node in the device tree; the touch one wants the driver's own resume
+# path to work.
+WIFI_HOST=f9864900.mmc          # mmc2; f9824900 is the eMMC, do not touch it
+SDHCI=/sys/bus/platform/drivers/sdhci_msm
+TOUCH=0-0048
+TOUCH_DRV=/sys/bus/i2c/drivers/max1187x
+
+case "$1/$2" in
+	post/*)
+		if [ -e "$SDHCI/$WIFI_HOST" ] &&
+		   ! ip link show wlan0 2>/dev/null | grep -q "state UP"; then
+			echo "$WIFI_HOST" > "$SDHCI/unbind" 2>/dev/null
+			sleep 2
+			echo "$WIFI_HOST" > "$SDHCI/bind" 2>/dev/null
+		fi
+
+		if [ -e "$TOUCH_DRV/$TOUCH" ]; then
+			echo "$TOUCH" > "$TOUCH_DRV/unbind" 2>/dev/null
+			sleep 1
+			echo "$TOUCH" > "$TOUCH_DRV/bind" 2>/dev/null
+		fi
+		;;
+esac
+exit 0

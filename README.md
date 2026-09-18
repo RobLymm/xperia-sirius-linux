@@ -61,7 +61,7 @@ the others listed there.
 | USB-OTG | Not tested | The controller sits in gadget mode and is what USB networking runs on. No USB role-switch is exposed in sysfs, so host mode would need checking rather than assuming |
 | NFC | Not working | NXP PN547. The mainline driver supports it and a device tree node is written, but it has never been flashed: there is no NFC node in the booted device tree and no driver loaded. `docs/nfc.md` |
 | CPU frequency and voltage scaling | Working | The full rated range, 300 MHz to 2265.6 MHz, on `cpufreq-dt` with the schedutil governor. All four cores reach 2265.6 MHz under load and drop to 300 MHz idle; a timed workload runs 5.5 times faster at the top than at the bottom, so the rate is real and not just reported. Nothing in mainline instantiates the Krait clock controller, so this needs the patches in `drivers/cpufreq/`: HFPLL data, a krait-cc fix, the device tree and OPP table, and the CPU supply, which is ganged PM8841 phases reached over the L2 SAW rather than per-core regulators |
-| Suspend and resume | Not working | Resume loses Wi-Fi and touch, so suspend is turned off. `docs/known-problems.md` |
+| Suspend and resume | Partly working | Suspend and resume themselves work; they had been masked, not broken. Wi-Fi comes back through a sleep hook that rebinds the SDIO host, and the touch driver can now be re-probed because its teardown was never wired to `remove`. The touchscreen's own resume path is still unsolved, and nothing but the power key can wake the phone — not Wi-Fi, not mobile data, not an incoming call. `docs/known-problems.md`, `userspace/systemd/` |
 | FM radio | Working | The tuner is inside the Broadcom Bluetooth chip, driven over HCI from userspace; audio arrives on the secondary MI2S port. The I2S link corrupts the sign bit of a burst of samples 41.6 times a second (chip and SoC bit clocks are independent); the `drivers/audio/fmrepair` ALSA plugin repairs it at the device layer. The app, [Robwatts FM Radio](https://github.com/RobLymm/robwatts-fm-radio), is published separately. `docs/fm-broadcom.md`, `drivers/audio/README.md` |
 
 `docs/whats-left.md` is the gap between this and a phone someone could use as
@@ -87,8 +87,9 @@ renderer.
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs
     upstream/           a mainline-style device tree, for submission
-    userspace/          the ALSA UCM profile, the proximity udev rule, and
-                        fixes for 32-bit ARM that are not Z2 specific
+    userspace/          the ALSA UCM profile, the proximity udev rule, the
+                        resume hook, and fixes for 32-bit ARM that are not
+                        Z2 specific
     tools/call-say.sh   play audio into a voice call, through the DSP
                         rather than a microphone
     tools/              build the board device tree and a boot image, check that
