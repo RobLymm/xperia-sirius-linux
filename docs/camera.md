@@ -142,10 +142,14 @@ the identity registers are non-standard, the streaming register is not.
 ## What the sensors say about themselves
 
 Read over CCI on 2026-09-19 with the rails up, reset released and MCLK at
-19.2 MHz. This matters because **there is no register table to copy** — see
-`prior-art.md` — so the sensors' own power-on defaults are the starting point
-for both drivers, and they turn out to be a complete, coherent
-full-resolution mode.
+19.2 MHz. The defaults describe a complete, coherent full-resolution mode, and
+they are the starting point for the geometry.
+
+They are **not** sufficient to make either sensor stream. The MIPI
+configuration lives in Sony's vendor register range and is zero at reset; for
+the IMX132 those values are published in Intel's old atomisp driver, and
+`prior-art.md` records what it holds. Nothing equivalent has been found for
+the IMX200.
 
 Both parts use the standard Sony/SMIA register map, and the geometry they
 report matches Sony's device tree exactly.

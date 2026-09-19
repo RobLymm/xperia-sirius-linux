@@ -163,10 +163,19 @@ should be. No errors in dmesg.
 
 # Front camera sensor: Sony IMX132
 
-`imx132.c`, and `sensor-nodes.dtsi` for the device tree half. Both are
-**written and compiling; neither has ever bound to the sensor**, because that
-needs the device tree node, which needs a flash. The module loads and
-registers on the I2C bus; nothing past that has run.
+`imx132.c`, and `sensor-nodes.dtsi` for the device tree half.
+
+**The driver binds and the sensor is in the media graph; it does not stream
+yet.** Probe reads the chip ID back, which exercises the power sequence, the
+19.2 MHz clock and the CCI bus together. The subdev appears as a Sensor
+entity reporting `SBGGR10_1X10/1976x1144` with crop `(0,28)/1976x1144` and an
+immutable link into CSIPHY2, and the whole pipeline down to `/dev/video0`
+configures. Asking it for frames gives
+
+    qcom-camss fda0ac00.camss: VFE sof timeout
+
+and the CSIPHY interrupt count does not move, so nothing is reaching the
+receiver.
 
 ## Where the numbers came from
 
@@ -187,6 +196,42 @@ tree for this phone exactly — `X_OUTPUT_SIZE` 1976 against Sony's
 The power sequence is Sony's, taken exactly from their published device tree:
 vdig, vio, vana, reset released, then the clock, with 1 ms between each and
 98 ms held down on the way out.
+
+## Why it does not stream yet
+
+The sensor accepts the streaming request — `0x0100` reads back 1 — and every
+geometry and exposure register the driver writes is confirmed in place. It
+simply does not drive the lanes.
+
+The cause is that the defaults are not a complete configuration, and the parts
+that are missing are not where an imx219 keeps them. **This part has no
+`0x0114` lane mode, no `0x0128` D-PHY control and no `0x012a` input clock
+register**: writes to them are accepted and discarded, and reads come back
+zero. Proved by writing `0x0340` in the same way and reading the new value
+back, so it is those registers and not the write path.
+
+Sony keeps them in the vendor range instead, and Intel's old atomisp driver
+publishes them — `0x3301` for the lane select and `0x3304`-`0x330e` for the
+D-PHY global timing, which is all zero at reset. Those, and about fifty
+analogue trim registers, are now in `imx132_vendor_init[]`. See
+`../../docs/prior-art.md`.
+
+That did not produce frames either, and the run that would have shown whether
+the vendor block actually landed could not be read back: the sensor was
+already powered down by then, and the ISPIF had wedged — `ispif is busy: 0xe`
+— which a reboot clears. So the next session starts there:
+
+1. Reboot, to clear the ISPIF.
+2. Confirm `0x3301` and `0x3304` read back non-zero while the driver holds the
+   sensor powered. If they do not, the vendor block is being written too early
+   or into a reset.
+3. If they do, the next suspect is the PLL. The driver keeps the sensor's
+   default multiplier of 45, giving a 216 MHz link; atomisp uses `0x0305 = 2`
+   and `0x0307 = 80`, giving 192 MHz, together with the D-PHY timings that
+   were computed for it. Adopting that pair means changing
+   `link-frequencies` in the device tree as well, so it needs a flash.
+4. Failing that, the lane mapping: clock on lane 1 with data on 0 and 2 is
+   inferred from Sony's `csi-lane-mask`, not confirmed.
 
 ## Things that are guesses, and how to check them
 

@@ -150,8 +150,37 @@ disassembles to arithmetic on a context structure, not a table lookup. The
 of their 16-bit words look like sensor registers, and they are mostly zeros.
 
 So Sony's HAL **computes** the register writes at run time from the module
-parameters and the sensor's own state. There is no table to extract, and the
-search should not be repeated.
+parameters and the sensor's own state. There is no table to extract from the
+stock system, and that search should not be repeated.
+
+**But a table does exist for the IMX132, and this page said otherwise for a
+few hours.** Intel's atomisp driver carried one:
+`drivers/staging/media/atomisp/i2c/imx/imx132.h`, in kernels 4.12 to 4.14,
+removed since. It has four mode tables and an init sequence, and the reason it
+was missed is the reason this page exists: the driver was assessed as
+"unusable here", which is true of the *driver* — it is bound to Intel's ISP —
+and says nothing about the *register values*, which are properties of the
+sensor.
+
+What it gives that nothing else does:
+
+- `0x3301`, the lane select. 0x00 is two lanes, 0x01 one, 0x03 four. It is
+  **not** at 0x0114 where an imx219 keeps it; this part has no 0x0114, no
+  0x0128 and no 0x012a, and writes to them are accepted and discarded while
+  reads return zero.
+- `0x3304`-`0x330e`, the **D-PHY global timing** — TLPX, TCLK-PREPARE,
+  TCLK-ZERO, TCLK-PRE, TCLK-POST, TCLK-TRAIL, THS-EXIT, THS-PREPARE,
+  THS-ZERO, THS-TRAIL. All zero at reset, which is why the sensor will accept
+  a streaming request and never drive the lanes.
+- About fifty more analogue and global trim registers in the 0x30xx and
+  0x31xx range.
+- A PLL setting, `0x0305 = 2` and `0x0307 = 80`, which at a 19.2 MHz input
+  gives 28.4 fps for a table named `imx132_1080p_30fps` — reason to think
+  Intel's board used the same input clock as this phone.
+
+The lesson is the one already at the top of this page, in a new shape: "not
+usable" is not "contains nothing usable". Check what a rejected driver holds
+before writing the same values from scratch.
 
 What that leaves, and why it is not as bad as it sounds: these are ordinary
 Sony IMX parts with the standard register map, and their power-on defaults can

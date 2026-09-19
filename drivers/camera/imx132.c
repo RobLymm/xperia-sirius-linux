@@ -47,6 +47,19 @@
 #define IMX132_REG_CSI_DATA_FORMAT	CCI_REG16(0x0112)
 #define IMX132_CSI_DATA_FORMAT_RAW10	0x0a0a
 
+#define IMX132_REG_SOFTWARE_RESET	CCI_REG8(0x0103)
+
+/*
+ * The MIPI configuration is in Sony's vendor range, not the SMIA one. This
+ * part has no 0x0114 lane mode, no 0x0128 D-PHY control and no 0x012a input
+ * clock register: writes to them are accepted and discarded, and reads come
+ * back zero, which is a slow way to find out.
+ */
+#define IMX132_REG_LANE_SEL		CCI_REG8(0x3301)
+#define IMX132_LANE_SEL_2LANES		0x00
+#define IMX132_LANE_SEL_1LANE		0x01
+#define IMX132_LANE_SEL_4LANES		0x03
+
 #define IMX132_REG_EXPOSURE		CCI_REG16(0x0202)
 #define IMX132_EXPOSURE_MIN		1
 #define IMX132_EXPOSURE_STEP		1
@@ -116,6 +129,88 @@ static const u32 imx132_mbus_formats[] = {
 	MEDIA_BUS_FMT_SGBRG10_1X10,
 	MEDIA_BUS_FMT_SGRBG10_1X10,
 	MEDIA_BUS_FMT_SRGGB10_1X10,
+};
+
+/*
+ * Global settings, analogue trim and the D-PHY global timing, from Intel's
+ * atomisp driver for this part (drivers/staging/media/atomisp/i2c/imx, kernel
+ * 4.12 to 4.14, removed since). That driver is unusable here -- it is bound to
+ * Intel's ISP -- but these are properties of the sensor, and they are the only
+ * published source for them.
+ *
+ * The 0x3304-0x330e block is the D-PHY timing: TLPX, TCLK-PREPARE, TCLK-ZERO,
+ * TCLK-PRE, TCLK-POST, TCLK-TRAIL, THS-EXIT, THS-PREPARE, THS-ZERO and
+ * THS-TRAIL. It is all zero at reset, so without it the sensor accepts a
+ * streaming request and never drives the lanes -- which presents as
+ * "VFE sof timeout" at the far end and nothing else.
+ */
+static const struct cci_reg_sequence imx132_vendor_init[] = {
+	{ CCI_REG8(0x3087), 0x53 },
+	{ CCI_REG8(0x308b), 0x5a },
+	{ CCI_REG8(0x3094), 0x11 },
+	{ CCI_REG8(0x309d), 0xa4 },
+	{ CCI_REG8(0x30aa), 0x01 },
+	{ CCI_REG8(0x30c6), 0x00 },
+	{ CCI_REG8(0x30c7), 0x00 },
+	{ CCI_REG8(0x3118), 0x2f },
+	{ CCI_REG8(0x312a), 0x00 },
+	{ CCI_REG8(0x312b), 0x0b },
+	{ CCI_REG8(0x312c), 0x0b },
+	{ CCI_REG8(0x312d), 0x13 },
+	{ CCI_REG8(0x30a4), 0x02 },
+	{ CCI_REG8(0x303c), 0x3c },
+	{ CCI_REG8(0x303d), 0x10 },
+	{ CCI_REG8(0x303e), 0x5a },
+	{ CCI_REG8(0x3040), 0x00 },
+	{ CCI_REG8(0x3041), 0x00 },
+	{ CCI_REG8(0x3048), 0x00 },
+	{ CCI_REG8(0x304c), 0x2f },
+	{ CCI_REG8(0x304d), 0x02 },
+	{ CCI_REG8(0x3064), 0x92 },
+	{ CCI_REG8(0x306a), 0x10 },
+	{ CCI_REG8(0x309b), 0x00 },
+	{ CCI_REG8(0x309e), 0x41 },
+	{ CCI_REG8(0x30a0), 0x10 },
+	{ CCI_REG8(0x30a1), 0x0b },
+	{ CCI_REG8(0x30b2), 0x00 },
+	{ CCI_REG8(0x30d5), 0x00 },
+	{ CCI_REG8(0x30d6), 0x00 },
+	{ CCI_REG8(0x30d7), 0x00 },
+	{ CCI_REG8(0x30d8), 0x00 },
+	{ CCI_REG8(0x30d9), 0x00 },
+	{ CCI_REG8(0x30da), 0x00 },
+	{ CCI_REG8(0x30db), 0x00 },
+	{ CCI_REG8(0x30dc), 0x00 },
+	{ CCI_REG8(0x30dd), 0x00 },
+	{ CCI_REG8(0x30de), 0x00 },
+	{ CCI_REG8(0x3102), 0x0c },
+	{ CCI_REG8(0x3103), 0x33 },
+	{ CCI_REG8(0x3104), 0x18 },
+	{ CCI_REG8(0x3105), 0x00 },
+	{ CCI_REG8(0x3106), 0x65 },
+	{ CCI_REG8(0x3107), 0x00 },
+	{ CCI_REG8(0x3108), 0x06 },
+	{ CCI_REG8(0x3109), 0x04 },
+	{ CCI_REG8(0x310a), 0x04 },
+	{ CCI_REG8(0x315c), 0x3d },
+	{ CCI_REG8(0x315d), 0x3c },
+	{ CCI_REG8(0x316e), 0x3e },
+	{ CCI_REG8(0x316f), 0x3d },
+	{ CCI_REG8(0x3304), 0x07 },
+	{ CCI_REG8(0x3305), 0x06 },
+	{ CCI_REG8(0x3306), 0x19 },
+	{ CCI_REG8(0x3307), 0x03 },
+	{ CCI_REG8(0x3308), 0x0f },
+	{ CCI_REG8(0x3309), 0x07 },
+	{ CCI_REG8(0x330a), 0x0c },
+	{ CCI_REG8(0x330b), 0x06 },
+	{ CCI_REG8(0x330c), 0x0b },
+	{ CCI_REG8(0x330d), 0x07 },
+	{ CCI_REG8(0x330e), 0x03 },
+	{ CCI_REG8(0x3318), 0x62 },
+	{ CCI_REG8(0x3322), 0x09 },
+	{ CCI_REG8(0x3342), 0x00 },
+	{ CCI_REG8(0x3348), 0xe0 },
 };
 
 struct imx132_mode {
@@ -445,6 +540,21 @@ static int imx132_configure(struct imx132 *imx132)
 	const struct imx132_mode *mode = &imx132_mode_1976x1144;
 	struct regmap *map = imx132->regmap;
 	int ret = 0;
+
+	/* Software reset, so that a restart does not inherit half a mode. */
+	cci_write(map, IMX132_REG_MODE_SELECT, IMX132_MODE_STANDBY, &ret);
+	cci_write(map, IMX132_REG_SOFTWARE_RESET, 1, &ret);
+	if (ret)
+		return ret;
+	usleep_range(5000, 6000);
+	cci_write(map, IMX132_REG_SOFTWARE_RESET, 0, &ret);
+
+	ret = cci_multi_reg_write(map, imx132_vendor_init,
+				  ARRAY_SIZE(imx132_vendor_init), &ret);
+	if (ret)
+		return ret;
+
+	cci_write(map, IMX132_REG_LANE_SEL, IMX132_LANE_SEL_2LANES, &ret);
 
 	cci_write(map, IMX132_REG_CSI_DATA_FORMAT,
 		  IMX132_CSI_DATA_FORMAT_RAW10, &ret);
