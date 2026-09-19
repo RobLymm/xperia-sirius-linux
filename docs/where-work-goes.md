@@ -21,6 +21,26 @@ To find out what is actually running:
 
 `/sys/firmware/fdt` is the tree the kernel received. Everything else is a guess.
 
+**Nor rebuild a tree from `/proc/device-tree`.** `dtc -I fs -O dts
+/proc/device-tree` looks like the same thing and is not: the reconstruction
+does not round-trip into a bootable tree. Use `/sys/firmware/fdt`, which is
+the blob itself, or the DTB inside an image known to boot.
+
+A worked example, 2026-09-19. Comparing the image the phone was flashed with
+against its own live tree:
+
+    tools/dt-equiv.py images/boot-voice-v1.img live.dtb
+    601 nodes compared, 0 differences
+
+and a candidate carrying deliberate camera changes against the same tree:
+
+    tools/dt-equiv.py images/boot-cam-v2.img live.dtb
+    601 nodes compared, 8 differences
+
+all eight being the intended ones. Equal node counts are the quick tell that
+nothing was dropped: the images that cost the evening below were built on a
+tree with fewer nodes, and this check would have said so in a second.
+
 ## Canonical places
 
 | Work | The one place it belongs |
@@ -62,9 +82,19 @@ touchscreen. Display, touch, battery and audio therefore currently depend on
 modules nobody else can obtain by installing packages.
 
 - **The touch driver is not in this repository at all.** `max1187x.c` and its
-  two headers exist only in `/home/rob/max1187x-fix` on the test phone.
-  `drivers/touch/` here is an empty directory. Nothing in the kernel package
-  builds it, so a packaged Z2 has no touchscreen.
+  two headers live in `drivers-wip/max1187x/` outside the repository, and on
+  the test phone in `/home/rob/max1187x-fix`. `drivers/touch/` here is an
+  empty directory. Nothing in the kernel package builds it, so a packaged Z2
+  has no touchscreen.
+
+  **That copy is not the pristine driver.** It carries two changes made while
+  chasing suspend, and anyone diffing it against the packaged version will
+  meet them: `.remove` is wired to the existing `shutdown()`, without which
+  the driver leaks its interrupt GPIO and input device and can never be
+  probed a second time; and `resume()` now calls `set_resume_mode()`, whose
+  only previous caller sat behind `#if 0`, so nothing ever woke the
+  controller after a suspend. Both belong upstream. Neither is sufficient on
+  its own to make touch survive a suspend; see `known-problems.md`.
 - **The board device tree carries no headphone or FM nodes.** No SLIMbus,
   codec, secondary MI2S, internal FM, voice link or MCLK controller. Those are
   in the two variant trees, and a tree built from the board file alone gives
@@ -85,7 +115,20 @@ modules nobody else can obtain by installing packages.
   far was flashed by hand, which is why `docs/from-stock-to-this.md` still
   starts by installing postmarketOS as an Xperia Z3 and layering the Z2 on top.
 
-Camera work has started: a `cci` module is built on the phone but not loaded.
+**Camera: the control bus works.** With `cci@fda0c000` enabled and the two
+camera master clocks hung off it, both CCI masters come up as ordinary i2c
+adapters, mainline's `i2c-qcom-cci` binds to `qcom,msm8974-cci`, its
+interrupt fires on every transfer, and the clocks run at 19.2 MHz. The module
+is hand-built and installed at `/lib/modules/6.16.12/updates/cci/`; it is not
+loaded at the moment only because the phone was reverted to a tree in which
+the node is disabled.
+
+The sensors do not answer yet. Three of the four rails were on; `lvs2`, the
+`vio` supply that powers the sensors' I/O and therefore their I2C, was not,
+and that is the next thing to test. Two details worth not rediscovering:
+`i2cdetect` is useless on these parts, because it probes with a one-byte read
+while they use 16-bit register addressing, and an absent sensor shows as
+`master 0 queue 0 timeout` rather than a NAK.
 
 See `known-problems.md` for the evening this cost, and the rule at the top of
 this page for how to avoid repeating it.
@@ -110,6 +153,21 @@ something not yet renamed. It is never the right place for new work.
 3. After flashing: compare the flashed image with `/sys/firmware/fdt`. 0
    differences proves the phone runs what you built.
 4. Then check the hardware itself, not only the tree.
+
+A cheap pre-flight when `dt-equiv.py` is not to hand — every boot image must
+contain both of these, and an image missing either will start a phone you
+cannot use:
+
+    strings -a boot.img | grep -c msm.vram=512m   # 1: else the GPU gets no
+                                                  # memory and the boot stalls
+    strings -a boot.img | grep -c max1187x        # 1: else there is no
+                                                  # touchscreen
+
+Take backups from the partition, before flashing, never after:
+
+    sudo dd if=/dev/disk/by-partlabel/boot of=backup.img bs=1M
+
+A backup made after flashing a bad image is a copy of the bad image.
 
 Static checks cannot prove a change is safe. The first conversion of this tree
 passed every static check and still broke audio and Bluetooth. The boot is the
