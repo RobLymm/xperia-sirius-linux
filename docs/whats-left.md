@@ -29,9 +29,25 @@ application-processor side has been eliminated by measurement — the codec's
 capture chain powers up and the AFE port is configured identically to an
 ordinary recording that captures real audio at the same moment — so the fault
 is inside the DSP's voice processor. `../drivers/audio/q6voice/README.md`
-lists what has been ruled out and what to try next; the cheapest untried
-thing is four transmit topologies this DSP accepts but that have never been
-tried for audio. Days, and it may need calibration data.
+lists what has been ruled out and what to try next.
+
+**Sony's source changed the order of what to try, on 2026-09-19.** Their driver
+sends three commands between creating the voice session and enabling it —
+`REGISTER_DEVICE_CONFIG`, `REGISTER_CALIBRATION_DATA_V2` and
+`REGISTER_VOL_CALIBRATION_DATA` — and this port sends none of them. All three
+bail out early when the calibration memory is unmapped, and **the caller
+ignores their return values**, so a call still connects and still enables with
+no calibration at all. That is our exact situation, and it means a call that
+carries downlink and transmits nothing is not evidence that calibration is
+unnecessary — it is what Sony's own code does without it.
+
+The transmit topology, meanwhile, already matches Sony's no-calibration
+fallback (`TX_SM_ECNS`), and Sony only selects the other topologies when the
+calibration database names them. So the four untried topologies are worth an
+hour because it is an hour, not because they are likely. The calibration path
+is the main line: map memory with `VSS_IMEMORY_CMD_MAP_PHYSICAL`, then send
+the three registrations in Sony's order. Days, and now with a worked example
+to follow rather than a guess.
 
 **Suspend and resume.** Does not work: resume loses Wi-Fi and the
 touchscreen, so suspend is disabled. Without it the battery lasts hours
@@ -42,8 +58,29 @@ to daily use. Days.
 
 **Touchscreen reliability.** The controller can stop responding entirely at
 the greeter, with no unlock gesture possible; a reboot recovers it. A phone
-that cannot be unlocked is unusable regardless of what else works. Suspected
-to be the s2idle resume path, so it may fall out of the suspend work. Days.
+that cannot be unlocked is unusable regardless of what else works.
+
+**There are two separate faults here, and only one of them is the
+touchscreen.** `known-problems.md` records that on a phone left running, the
+MSM GEM shrinker can crash inside the GEM locks and leave the compositor in
+uninterruptible sleep — drawing nothing and reading no input, which looks
+exactly like a dead touchscreen and is not one.
+
+The touchscreen's own fault is the resume path, and its cause was found on
+2026-09-19 by diffing this driver against Sony's published original, which is
+the same file. The reset GPIO is parsed from the wrong element of the device
+tree property, so it is never claimed and the controller can never be
+power-on-reset. Since `enable_resume_por` is set, that is the whole of what
+resume does. The device confirmed it at every boot: `GPIO request failed for
+gpio reset (-2)`.
+
+**Fixed the same day.** With the index corrected the hardware reset works —
+`hw reset occured` where it used to report `irq reset timeout`, with the chip
+raising its reset interrupt. What is not yet re-tested is a real suspend and
+resume, which needs someone at the phone because waking it needs the power key.
+Whether the greeter symptom was ever this fault, the shrinker crash, or both at
+different times is not settled. `known-problems.md` and
+`sony-source-audit.md` have the before and after.
 
 ## Blocking for some people, not for all
 
@@ -145,13 +182,21 @@ firmware. Whether it was the only cause is unknown.
 **The secondary microphone reads nothing.** Needed for noise suppression and
 for room pickup at any distance.
 
-Sony's device tree says where all four analogue microphones are, which this
-port had to guess at: **AMIC1 is the secondary microphone**, AMIC2 the headset
-microphone, AMIC3 the left noise-cancelling microphone with AMIC2 doubling as
-the right one, and AMIC4 the handset microphone that does work. If the routing here points the
-secondary microphone anywhere but AMIC1, that is the whole fault, and fixing
-it needs no flash. All four biases and their filter assignments are in
-`sony-source-audit.md`.
+Checked against Sony's routing on 2026-09-19, and **the routing is not the
+fault**: the live device tree on the phone has AMIC1 to the secondary
+microphone, AMIC2 to the headset microphone and AMIC4 to the handset
+microphone, each through the right bias, matching Sony exactly.
+
+Four routes Sony has are missing here, and they were tested as an explanation
+and are not one. `LDO_H`, the supply behind every microphone bias, comes up for
+every capture on both microphones without Sony's route to `MCLK`. Measured:
+AMIC1 returns peaks of 4 and 6 while its bias is powered and its route is
+right, against 2083 rms from AMIC4 in the same room seconds earlier. **The
+fault is below the routing** — the ADC, the decimator, or the microphone — and
+Sony's source has nothing further to say about it. The two routes still missing
+that are real features are the noise-cancelling pair, `AMIC3` to `ANCLeft
+Headset Mic` and `MIC BIAS2 External` to `ANCRight Headset Mic`.
+`sony-source-audit.md` has the measurement.
 
 ## Individual components that are not finished
 
@@ -169,12 +214,16 @@ a simple I2C part and the smallest of the three.
 
 **The battery reports no current, and charges with no protection.** Capacity
 comes from a voltage reading and an OCV table, which works but is the crude
-method: there is no current measurement and no coulomb counting. Sony's device
-tree gives the missing number — `qcom,rsense = <10000000>` on the PM8941
-IADC, which is nano-ohms in that driver, so a **10 mΩ external sense
-resistor**. Mainline has `qcom-spmi-iadc`, so charge and discharge current in
-sysfs is a device tree entry away, and a software coulomb counter becomes
-possible after that.
+method: there is no current measurement and no coulomb counting.
+
+Checked on the device on 2026-09-19, and this is smaller than it was recorded
+as. `BACKLOG.md` has it stopping for want of the sense resistor value; the
+value was never missing. Sony's 10 mΩ is already in the live device tree as
+`qcom,external-resistor-micro-ohms = <10000>`, from mainline's own
+`pm8941.dtsi`, `qcom_spmi_iadc` is loaded and bound, and the phone already
+exposes `in_current0_raw` and `in_current1_raw` on `iio:device5`. What is
+missing is only the plumbing from that channel into the battery power supply,
+which has `capacity`, `voltage_now` and no `current_now`. No flash needed.
 
 Separately, the charging limits here are Sony's four headline values and
 nothing else. Sony's charger node also carries a thermal mitigation ladder
@@ -203,6 +252,15 @@ complete NXP stack for these parts — `sound/soc/codecs/tfa/`, with an
 initialisation table written for the TFA9890 specifically. What that would buy
 is loudness without risking the drivers, which is the usual reason a phone's
 speakers sound better than the same parts on a generic driver.
+
+**Two of the six panels have no runtime support.** The panel driver detects
+the variant from `lcdid_adc` and handles four: both Renesas Sharp and AUO, the
+Renesas JDI, and the Novatek JDI this unit has. A phone with Sharp-on-Novatek
+(ADC 1236000-1395000) or AUO-on-Novatek (1420000-1594000) falls through to
+`matches no known panel` and gets no display. Both were extracted from Sony's
+tree long ago and exist as standalone drivers in `panel-variants/generated/`;
+folding them into the runtime driver is transcription, not research, and
+cannot be tested here without one of those panels.
 
 **Proximity's near threshold is a guess.** It is set to 250 against a far
 reading of 93-122, which is clear of the noise but has never been checked

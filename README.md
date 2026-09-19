@@ -50,7 +50,7 @@ the others listed there.
 | USB networking | Working | SSH over USB at 172.16.42.1 |
 | Flashing | Working with `fastboot flash boot` | Sony's S1 bootloader boots the boot partition directly. Build the image with `tools/`; see `devicetree/README.md` |
 | Touch | Working | Maxim MAX1187x, out-of-tree driver, Sony's binding. Reports multitouch in evdev protocol A; see `docs/known-problems.md` |
-| Screen | Working | Six panel variants, selected at runtime, with a generated driver for each. `drivers/panel/`, `panel-variants/` |
+| Screen | Working | The panel driver detects the variant at runtime from `lcdid_adc` and handles **four** of the Z2's six panels, including this unit's JDI-on-Novatek. The other two, Sharp-on-Novatek and AUO-on-Novatek, exist only as standalone generated drivers in `panel-variants/generated/` and are not wired in: a phone with one gets no display. `drivers/panel/`, `panel-variants/`, `docs/sony-source-audit.md` |
 | Wi-Fi | Working | Broadcom brcmfmac over SDIO, in-tree driver |
 | FDE | Not tested | The test install is unencrypted |
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
@@ -112,7 +112,7 @@ renderer.
 
 ## Layout
 
-    drivers/panel/      display: DRM panel driver, all six Z2 panel variants
+    drivers/panel/      display: DRM panel driver, four of the six Z2 panels
     drivers/audio/      speakers and earpiece: ASoC machine driver for the
                         msm8974 sound card
     drivers/audio/wcd9320/   headphones and microphones: the WCD9320 codec on

@@ -62,8 +62,10 @@ What it contains, and where each part came from:
 Deliberately left out, with the reason:
 
 - **Display.** Needs the panel driver, which is not upstream. Six panel
-  variants exist for this device; see ../panel-variants/. This is the largest
-  piece of follow-up work and benefits the whole family.
+  variants exist for this device and the driver handles four of them; see
+  ../panel-variants/ and ../docs/sony-source-audit.md. Folding in the last two
+  is a prerequisite for submitting it. This is the largest piece of follow-up
+  work and benefits the whole family.
 - **Touch.** The Z2's MAX1187x has no mainline driver and Sony's binding is
   nothing like a mainline one (see `touchscreen@48` in
   ../devicetree/qcom-msm8974pro-sony-xperia-shinano-sirius.dts: dozens
@@ -116,6 +118,15 @@ every Sony msm8974 phone carries the same TA partition. See ../modem/.
 The FM tuner is likewise driven from userspace over Bluetooth HCI, and the
 periodic corruption in its capture is repaired by an ALSA plugin
 (../drivers/audio/fmrepair/). Neither belongs in the kernel.
+
+### Before any of this is sent
+
+Findings from reading Sony's published source are in
+`../docs/sony-source-audit.md`, and two of them bear on what can be submitted:
+the touch driver's reset GPIO fix, which belongs in any version of that driver
+that goes anywhere, and the two unhandled panel variants above. Each finding
+there cites the Sony file, branch and commit it came from, which is the
+provenance a submission needs when it carries vendor code.
 
 ### Submission order
 

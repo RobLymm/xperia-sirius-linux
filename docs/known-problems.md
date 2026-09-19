@@ -86,6 +86,45 @@ carveout:
 With 128 MB the screen freezes once the carveout fills. 512 MB has been stable
 for compositor use.
 
+## The kernel tree on the phone does not reproduce the running device tree
+
+The same class of trap as the section below, found on 2026-09-19 while trying
+to build a boot image for the NFC node.
+
+`~/kbuild/linux-6.16.12` on the phone is a **stock** tree. It is what
+`tools/kbuild-mod.sh` builds modules against, and that is all it is good for.
+The running device tree did not come from it: it came from the packaged kernel,
+`linux-postmarketos-qcom-msm8974`, which carries this project's device-tree
+patches. Building the board file against the stock tree and flashing the result
+would silently undo them.
+
+Measured, comparing a DTB built from that tree against `/sys/firmware/fdt` with
+`tools/dt-equiv.py`:
+
+    535 nodes compared, 126 differences
+
+and the differences are not cosmetic:
+
+| | Running | Built from `~/kbuild` |
+|---|---|---|
+| `cpu0-thermal` trip0 | 80000 (80 °C), hysteresis 5000 | 75000, hysteresis 2000 |
+| `remoteproc@fe200000` `power-domains`, `cx-supply` | present | **absent** |
+| `remoteproc@fc880000`, `@fb204000` power domains | present | **absent** |
+| `interconnect@fc470000/fc480000` clocks | present | **absent** |
+
+Dropping the remoteproc power domains is the dangerous one: that is the ADSP
+and the modem.
+
+**So a boot image needs a kernel tree with this project's device-tree patches
+applied** — the aport's, or a tree with `cpufreq/00{10..16}` and the rest put
+on by hand. `tools/build-board-dtb.sh` says as much in its header ("SoC-level
+device tree patches ... are picked up if they are applied"); this records what
+happens when they are not, and that the tree sitting on the phone is not one of
+them.
+
+Always run `tools/dt-equiv.py` against the live tree before flashing. A count
+in the single figures, matching the nodes you meant to change, is the pass.
+
 ## Do not build a boot image from the files in /boot
 
 Two files there look authoritative and are not:
@@ -190,7 +229,46 @@ reports nothing. What is known after that:
   it either.
 
 So the controller is awake on the bus and not scanning, and neither the reset
-path nor the command path restores it. Unsolved.
+path nor the command path restores it.
+
+**Cause found, 2026-09-19: the reset line is never claimed.** Diffing this
+driver against Sony's published original — it is the same file — showed the
+device tree parse asking for the wrong element:
+
+```c
+pdata->gpio_tirq  = of_get_named_gpio(devnode, "tirq-gpio", 0);
+pdata->gpio_reset = of_get_named_gpio(devnode, "reset-gpio", 1);
+```
+
+`reset-gpio = <&tlmm 85 0x2>` holds one specifier, so index 1 returns
+`-ENOENT`. `gpio_reset` is a `u32`, so that error becomes a large positive
+number: every `if (ts->pdata->gpio_reset)` guard passes and every operation on
+the line fails. Confirmed in the boot journal:
+
+    max1187x 0-0048: (INIT): chip init OK
+    max1187x 0-0048: GPIO request failed for gpio reset (-2)
+    max1187x 0-0048: (INIT): Input touch device OK
+
+`max1187x_gpio_init()` only warns, so probe continues and touch works while
+awake. But `reset_power()` does nothing except toggle that line, and
+`enable_resume_por = <1>` in our device tree sends `set_resume_mode()` straight
+into it. So the resume path calls a reset that cannot happen — which is
+precisely why wiring `set_resume_mode()` in was necessary and not sufficient,
+and why the chip answers I2C and does not scan.
+
+`tirq-gpio` uses index 0 and is correct, which is why the interrupt works and
+only the reset is dead.
+
+**Fixed on 2026-09-19**, index `1` to `0`, rebuilt and reloaded on the phone.
+The probe warning is gone, and the reset that used to report `irq reset
+timeout` now reports `hw reset occured` with the interrupt count moving across
+it — the chip raising its reset interrupt, the handshake that releases
+`reset_sem` and had never run. The chip answers afterwards.
+
+**Suspend and resume are not yet re-tested**, because waking needs the power
+key. `set_resume_mode()` calls exactly the `reset_power()` that now works, so
+the mechanism is there; whether it is sufficient is open. `sony-source-audit.md`
+has the before and after.
 
 ### The touch driver could not be re-probed at all — fixed
 
@@ -341,6 +419,16 @@ for each:
   fresh activation there is no data whatsoever.
 
 Whatever alternates is below the level the driver can see. Unfixed.
+
+**A third explanation tested and disproved, 2026-09-19.** Sony's board routing
+sources `LDO_H` — the supply behind every microphone bias — from `MCLK`, and
+ours does not, which would have explained a supply that is up on one stream and
+down on the next. It does not: reading the DAPM widget states one second into
+each of four captures shows `LDO_H` and `MIC BIAS1 External` **on for every
+one**, good and silent alike, because the codec's own internal link powers the
+supply without needing the board route. The capture alternated as usual in the
+same run — rms 2083, 0, 95, 0 — with identical widget states throughout. Adding
+the route would not have helped. `sony-source-audit.md` has the table.
 
 ## Microphones
 
