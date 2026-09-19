@@ -38,10 +38,26 @@ itself on 2026-09-19, five identical reads:
     rear  0x10  register 0x0016  ->  0x0200   IMX200
     front 0x36  register 0x0000  ->  0x0132   IMX132
 
-So this unit's stock tuning file (`SOI20BS0_IMX200.dat`) was right and the
+Confirmed independently by the module EEPROMs, which carry the part numbers
+as plain ASCII:
+
+    rear  0x50:  "SOI20BS0" ... "IMX2000A" ... "BU64296G"
+    front 0x50:  "SEM02BN1" ... "IMX132"
+
+Three lines of evidence agree for the rear — the stock tuning file name, the
+sensor's own ID register, and the module EEPROM — and on both cameras the
+module part number in the EEPROM matches the tuning filename exactly. The
 public Xperia Z2 specifications, which say IMX220, are wrong for this device.
+The `0A` after IMX200 is a revision suffix.
+
+`BU64296G` is the Rohm voice-coil driver for the autofocus, which is the chip
+answering at 0x0c on the rear bus.
+
 Note the two sensors keep their model ID in different registers: the rear at
-0x0016 reads 0 at 0x0000, and the front at 0x0000 reads 0 at 0x0016.
+0x0016 reads 0 at 0x0000, and the front at 0x0000 reads 0 at 0x0016. The
+rear also reads 0 across the whole SMIA identity block at 0x0000-0x0004, so
+a driver that checks the standard location will conclude the sensor is
+absent.
 
 What else is on the two buses, from the same scan:
 
@@ -49,7 +65,7 @@ What else is on the two buses, from the same scan:
 |---|---|---|
 | sensor | 0x10 | 0x36 |
 | EEPROM | 0x50-0x57 | 0x50-0x57 |
-| autofocus actuator | 0x0c | none, as expected |
+| autofocus actuator | 0x0c, a Rohm BU64296G | none, as expected |
 
 No mainline driver exists for IMX200, IMX220, IMX132 or IMX135 (IMX132 appears
 only in the old `staging/media/atomisp`, Intel-coupled and unusable here). The
