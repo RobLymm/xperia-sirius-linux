@@ -93,6 +93,34 @@ firmware. Whether it was the only cause is unknown.
 **The secondary microphone reads nothing.** Needed for noise suppression and
 for room pickup at any distance.
 
+## Individual components that are not finished
+
+The part-by-part state of everything is in the component table in
+`../README.md`. These are the entries in it that are not "Working", with what
+each would take.
+
+**The camera parts are identified and driverless.** Rear **IMX200**, front
+**IMX132**, autofocus a Rohm **BU64296G**, all three answering on the CCI
+bus, none with a driver. The IMX200 has no driver anywhere and has to be
+written from Sony's downstream register sequences; the IMX132 exists only in
+the Intel-coupled `staging/atomisp`, which is not usable here. The actuator
+is a simple I2C part and the smallest of the three.
+
+**Proximity's near threshold is a guess.** It is set to 250 against a far
+reading of 93-122, which is clear of the noise but has never been checked
+against an actual face. One measurement settles it.
+
+**Nothing drives the backlight from the light sensor.** The sensor works and
+reports the room; no automatic brightness consumes it.
+
+**The magnetometer is not calibrated as a compass.** It reads, but heading
+needs calibration and a consumer.
+
+**The vibrator and the notification LED are present and untested.** Both
+appear — `pm8xxx_vib_ffmemless` and `rgb:status` — and neither has been made
+to buzz or light up. Minutes of work each, but until someone does it they
+are claims rather than capabilities.
+
 ## Untested, and cheap to find out
 
 Full-disk encryption, and USB host mode — the controller sits in gadget mode,

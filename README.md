@@ -54,7 +54,7 @@ the others listed there.
 | FDE | Not tested | The test install is unencrypted |
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
 | 3D | Partly working | Adreno 330 through freedreno runs the compositor, on mesa 26.2.2. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer, set in `/etc/sirius-renderer`. Needs a VRAM carveout. `docs/known-problems.md` |
-| IMU | Working | Accelerometer, gyroscope, magnetometer and barometer. The light and proximity sensors are an APDS-9930 and both work: ambient light reports 48-86 lux and tracks the room, and proximity is exposed to userspace by `userspace/udev/90-sirius-proximity.rules`. The near threshold has not been checked against a real face |
+| IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
 | Camera | Not working | The CCI control bus is in the booted device tree but `status = "disabled"`, and neither `I2C_QCOM_CCI` nor `MEDIA_SUPPORT` is built, so there is no camera stack at all. msm8974 CAMSS support exists out of tree for the Nexus 5 and needs re-expressing for 6.16; the two Sony sensors have no drivers anywhere. `docs/camera.md`, `docs/camera-plan.md` |
@@ -72,6 +72,36 @@ the others listed there.
 their only phone, ordered by what blocks that. `docs/todo.md` is the same
 work as an ordered list, with the capability checklist to run once it is
 done.
+
+## Individual components
+
+The table above follows the postmarketOS device table, which groups things
+like "IMU" together. This is the part-by-part view, so a component that works
+is not hidden inside a row about something else. Readings below were taken
+from the device on 2026-09-19.
+
+| Component | Part | State | Detail |
+|---|---|---|---|
+| Accelerometer | Bosch BMA255 | Working | `iio:device2`, reads live |
+| Gyroscope | Bosch BMG160 | Working | `iio:device4`, reads live |
+| Magnetometer | AKM AK8975 | Working | `iio:device3`, reads live. Not calibrated as a compass |
+| Barometer | Bosch BMP280 | Working | `iio:device0`, 100.4 kPa |
+| Ambient light | Avago APDS-9930 | Working | `iio:device1`, tracks the room. Nothing drives the backlight from it yet |
+| Proximity | Avago APDS-9930 | Working | Needed one `PROXIMITY_NEAR_LEVEL` udev property, not calibration; `userspace/udev/`. The near threshold has not been checked against a real face |
+| Touchscreen | Maxim MAX1187x | Working | Out-of-tree driver. Does not survive suspend without the resume hook |
+| Power key | PM8941 | Working | Also the only thing that can wake the phone from suspend |
+| Volume keys | gpio-keys | Working | |
+| Vibrator | PM8941 | Present, untested | `pm8xxx_vib_ffmemless` input device exists |
+| Notification LED | Qualcomm LPG | Present, untested | `rgb:status` |
+| Backlight | | Working | 4096 levels |
+| Battery gauge | PM8941 VADC | Working | Percentage from VBAT_SNS and an OCV table |
+| Charger | PM8941 SMBB | Working | USB and DC inputs both present |
+| Rear camera sensor | **Sony IMX200** | Detected, no driver | Answers on CCI, identifies itself. No driver exists for this part anywhere |
+| Front camera sensor | **Sony IMX132** | Detected, no driver | Answers on CCI. Only out-of-tree driver is in the unusable `staging/atomisp` |
+| Autofocus actuator | Rohm BU64296G | Detected, no driver | At 0x0c on the rear camera bus |
+| Camera module EEPROMs | | Readable | Both, at 0x50. Carry the module and sensor part numbers as ASCII |
+| Camera control bus | Qualcomm CCI | Working | Both masters enumerate; mainline `i2c-qcom-cci` binds |
+| Camera ISP | Qualcomm CAMSS | Not working | No media stack in the kernel, and msm8974 support needs re-expressing for 6.16 |
 
 Read `docs/known-problems.md` before relying on any of this. The one that
 matters most: applications rendering on the GPU hang it and can eventually

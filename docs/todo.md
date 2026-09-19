@@ -134,6 +134,19 @@ turned out to be written and working.
 **Done when** the screen blanks when the phone is held to a face during a
 call and comes back when it is moved away, without dropping the call.
 
+## Quick wins, minutes each
+
+Small enough to do while waiting for something else, and each turns a claim
+into a capability.
+
+- [ ] **Make the vibrator buzz.** `pm8xxx_vib_ffmemless` exists; nothing has
+      driven it.
+- [ ] **Light the notification LED.** `rgb:status` exists; same.
+- [ ] **Check the proximity threshold against a face**, rather than against
+      the noise floor it was set from.
+- [ ] **Drive the backlight from the light sensor**, which works and is
+      currently consumed by nothing.
+
 ## Also outstanding
 
 Not on the priority list above, but each has a known symptom.
