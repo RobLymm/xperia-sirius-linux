@@ -115,20 +115,14 @@ divider, the q6voice set, the panel driver, the battery pair and the
 touchscreen. Display, touch, battery and audio therefore currently depend on
 modules nobody else can obtain by installing packages.
 
-- **The touch driver is not in this repository at all.** `max1187x.c` and its
-  two headers live in `drivers-wip/max1187x/` outside the repository, and on
-  the test phone in `/home/rob/max1187x-fix`. `drivers/touch/` here is an
-  empty directory. Nothing in the kernel package builds it, so a packaged Z2
-  has no touchscreen.
+- **The touch driver is in `drivers/touch/` but not in the kernel package.**
+  Published on 2026-09-19; until then it existed only on the test phone.
+  Nothing in the package builds it, so a packaged Z2 still has no
+  touchscreen, and that is the remaining half of this gap.
 
-  **That copy is not the pristine driver.** It carries two changes made while
-  chasing suspend, and anyone diffing it against the packaged version will
-  meet them: `.remove` is wired to the existing `shutdown()`, without which
-  the driver leaks its interrupt GPIO and input device and can never be
-  probed a second time; and `resume()` now calls `set_resume_mode()`, whose
-  only previous caller sat behind `#if 0`, so nothing ever woke the
-  controller after a suspend. Both belong upstream. Neither is sufficient on
-  its own to make touch survive a suspend; see `known-problems.md`.
+  **It is not the pristine driver.** It carries two changes made while
+  chasing suspend, both described in `../drivers/touch/README.md`. Both
+  belong upstream.
 - **The board device tree carries no headphone or FM nodes.** No SLIMbus,
   codec, secondary MI2S, internal FM, voice link or MCLK controller. Those
   are in the two variant trees, and a tree built from the board file alone

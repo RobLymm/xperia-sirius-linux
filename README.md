@@ -126,8 +126,8 @@ renderer.
                         supply, 300 MHz to 2265.6 MHz
     drivers/fm/         V4L2 driver for WCNSS FM tuners (other msm8974 phones,
                         not the Z2)
-    drivers/touch/      empty. The MAX1187x touchscreen driver the phone runs
-                        is not published yet; see docs/where-work-goes.md
+    drivers/touch/      touchscreen: the MAX1187x driver the phone runs,
+                        with two fixes; not yet in the kernel package
     panel-variants/     the six panel configurations extracted from stock,
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs
