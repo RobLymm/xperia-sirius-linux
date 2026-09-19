@@ -12,7 +12,14 @@ and the ports are left for the board file to fill in.
 There is deliberately no iommus property. msm8974's camera subsystem has no
 IOMMU, which is why the driver takes contiguous buffers from CMA here.
 
-NOT yet tested on hardware.
+Tested on an Xperia Z2 (msm8974pro) with the node enabled: camss probes,
+enumerates the full graph, and captures frames from the CSID test pattern
+generator.
+
+One property is missing and known: the CSIDs take their MIPI supply from
+pm8941_l12 at 1.8 V in Sony's tree, and without a vdda-supply the driver
+falls back to a dummy regulator. That does not matter for the test pattern,
+which needs no MIPI signalling, but it will for a real sensor.
 
 --- a/arch/arm/boot/dts/qcom/qcom-msm8974.dtsi
 +++ b/arch/arm/boot/dts/qcom/qcom-msm8974.dtsi

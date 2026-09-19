@@ -166,26 +166,33 @@ two accepted candidates still disagree it prints `AMBIG` and adds nothing.
 One more: namespaced exports (`EXPORT_SYMBOL_NS_GPL(dma_buf_fd, "DMA_BUF")`)
 must keep their namespace, or modpost stops checking `MODULE_IMPORT_NS`.
 
+## The ISP works
+
+msm8974 CAMSS was re-expressed for 6.16 and it runs: the driver probes clean,
+enumerates 3 CSIPHY, 4 CSID, 4 ISPIF lines, 2 VFE and six video nodes, and
+captures correct frames from CSID0's test pattern generator. The patches, the
+reasoning, the two bugs that only showed up when it ran, and the capture
+recipe are in `../drivers/camera/README.md`.
+
+The phone is running `images/boot-camss-v1.img`, which is `boot-cam-v2.img`
+plus the camss node. `qcom-camss.ko` is in
+`/lib/modules/6.16.12/updates/media/` and `v4l-utils` is installed.
+
 ## What remains, in order
 
-1. **msm8974 CAMSS for 6.16.** Now the gate: nothing downstream can be tested
-   until camss registers a `/dev/video*`. The only existing work is a 5.17-era
-   Nexus 5 patch; camss has since moved to per-SoC `camss_subdev_resources`
-   tables, so it must be re-expressed rather than applied. Two things are
-   settled: it is excluded today by `depends on (ARCH_QCOM && IOMMU_DMA)` and
-   msm8974 has no camera IOMMU, so that dependency has to go and
-   `videobuf2-dma-contig` replaces the sg variant; and every clock it needs is
-   already in mainline's `mmcc-msm8974`. The map is in `camera.md`.
-2. **An IMX200 driver.** None exists anywhere. Sony's published kernel gives
-   the power sequence exactly but **no register or mode tables** — those were
-   in the userspace HAL. See `prior-art.md` for what is and is not in that
-   source, and `camera.md` for the sequences taken from it.
-3. **An IMX132 driver.** Exists only in the Intel-coupled `staging/atomisp`,
-   which is not usable here.
-4. **Device tree for the sensors and the ISP blocks** — CSIPHY, CSID, ISPIF,
-   VFE, with the sensor nodes carrying supplies, clocks, resets and CSI
-   endpoints. The hardware map is in `camera.md`.
-5. **The BU64296G actuator**, a simple I2C part and the smallest of the
+1. **An IMX132 driver** for the front camera, and then **an IMX200 driver**
+   for the rear. This is the gate now, and the hard part is the data rather
+   than the code: Sony's published kernel gives the power sequences exactly
+   and no register or mode tables at all, because in this generation they
+   lived in the userspace HAL. They have to come off the stock system
+   partition. `prior-art.md` has what is and is not in Sony's source, and
+   `camera.md` the sequences taken from it.
+2. **Device tree for the sensor nodes** — supplies, clocks, resets and the
+   CSI endpoints into CSIPHY 0 and 2. The ISP half is already in the tree.
+   Add `vdda-supply = <&pm8941_l12>` to the camss node at the same time: the
+   CSIDs fall back to a dummy regulator without it, which the test pattern did
+   not care about and a real sensor will.
+3. **The BU64296G actuator**, a simple I2C part and the smallest of the
    three drivers.
 
 libcamera 0.7.2 and Snapshot are installed on the phone, and libcamera's

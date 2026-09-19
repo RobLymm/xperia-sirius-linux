@@ -49,16 +49,18 @@ V4L2 media core is built and loaded, and that needed no kernel rebuild and no
 flash, because every part of the media stack is a module and the three things
 it needs built in were already there for the GPU.
 
-What is left is genuinely hard, in two unequal pieces. **The ISP is days**:
-msm8974 CAMSS exists only as a 5.17-era out-of-tree patch that has to be
-re-expressed for 6.16, but every address, interrupt and clock it needs is
-known and confirmed from three independent sources, and the mainline
-`mmcc-msm8974` driver already has every clock. **The two sensor drivers are
-weeks**, and the reason is narrower than "no driver exists": the power
-sequences are published by Sony exactly, but the register and mode tables are
-not in any kernel, Sony's included — in this generation they lived in the
-userspace camera HAL — so they have to be recovered from the stock system
-partition. See `camera-plan.md`.
+The ISP is done too, and took a day rather than the weeks estimated: msm8974
+CAMSS is re-expressed for 6.16, probes clean, and captures frames from its
+test pattern generator. Every address, interrupt and clock it needed was
+already known from three independent sources, and mainline's `mmcc-msm8974`
+already had every clock.
+
+**What is left is the two sensor drivers, and they are weeks.** The reason is
+narrower than "no driver exists": the power sequences are published by Sony
+exactly, but the register and mode tables are not in any kernel, Sony's
+included — in this generation they lived in the userspace camera HAL — so
+they have to be recovered from the stock system partition. That recovery, not
+the driver writing, is the unknown. See `camera-plan.md`.
 
 **NFC.** Not working, and not merely untested: there is no NFC node in the
 booted device tree and no driver loaded. The mainline driver supports the

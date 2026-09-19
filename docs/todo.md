@@ -74,7 +74,8 @@ reboot, so autoconnect works.
 
 ## 3. Camera
 
-Staged in `camera-plan.md`. Two stages are done, and the gate has moved.
+Staged in `camera-plan.md`. Three stages are done, and the gate has moved
+from the kernel to the sensor data.
 
 - [x] **Stage 1** — the media core. It needed no kernel rebuild and no flash:
       every part of the media stack is tristate, and `DMA_SHARED_BUFFER`,
@@ -85,29 +86,24 @@ Staged in `camera-plan.md`. Two stages are done, and the gate has moved.
       answer and identify themselves from the silicon: rear **IMX200**, front
       **IMX132**. The phone runs `images/boot-cam-v2.img`, which carries the
       tree this needs.
-- [ ] **Stage 3** — msm8974 CAMSS for 6.16. **Written, compiles, untested.**
-      Two patches in `../drivers/camera/`: the driver and the device tree
-      node. `qcom-camss.ko` links clean out of tree, and the device tree
-      change produces exactly the ten intended differences and nothing else.
-      The module loads and registers its platform driver, but no probe path
-      has run, because the driver cannot bind until the node is in a flashed
-      image.
-
-      **The next thing to do is flash `images/boot-camss-v1.img`.** It is the
-      image the phone is already running with the camss node added and nothing
-      else changed — 604 nodes, 2 differences against the live tree, and both
-      pre-flight `strings` checks pass. The backup taken from the partition
-      beforehand is `images/boot-backup-before-camss.img`. Then
-      `sudo modprobe qcom-camss` and read `dmesg`. Expect it not to work first
-      time; the interesting part is how far probe gets through the clocks and
-      the VFE GDSC.
-
-      **Done when** `media-ctl -p` shows the CSIPHY → CSID → ISPIF → VFE
-      graph and a CSID test pattern produces frames.
+- [x] **Stage 3** — msm8974 CAMSS for 6.16. **Done.** Two patches in
+      `../drivers/camera/`. The driver probes clean, enumerates 3 CSIPHY,
+      4 CSID, 4 ISPIF lines, 2 VFE and six video nodes, and captures ten
+      correct 1920x1080 SRGGB10 frames from CSID0's test pattern generator.
+      Two bugs surfaced only by running it, both recorded in that README: an
+      unreachable VFE clock rate, and a `switch` on SoC version in
+      `vfe_src_pad_code` that a grep for `==` does not find.
 - [ ] **Stage 4/5** — sensor drivers for the IMX132 front and the IMX200
-      rear. Sony's published kernel gives the power sequences exactly and
-      **no register or mode tables at all**; those were in the userspace HAL
-      and have to come off the stock system partition.
+      rear. **This is now the blocker**, and the hard part is not writing the
+      drivers but getting the data: Sony's published kernel gives the power
+      sequences exactly and **no register or mode tables at all**, because in
+      this generation they lived in the userspace HAL. They have to be
+      recovered from the stock system partition first.
+
+      Two smaller things to do alongside, both needing a flash: add
+      `vdda-supply = <&pm8941_l12>` to the camss node, which a real sensor
+      needs and the test pattern did not, and add the sensor nodes and CSI
+      endpoints once there is a driver to bind them.
 
 **Done when** a still is captured from each camera and a video is recorded
 from the rear one.

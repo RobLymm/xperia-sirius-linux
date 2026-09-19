@@ -105,10 +105,11 @@ two EEPROMs with `i2ctransfer` on the CCI buses.
 EEPROMs were read. `handover-camera.md` has the commands and the four traps.
 The phone runs `images/boot-cam-v2.img`, which carries this tree.
 
-## Stage 3 — CAMSS for msm8974 — written, compiles, untested
+## Stage 3 — CAMSS for msm8974 — done, 2026-09-19
 
 Two patches in `../drivers/camera/`, with that directory's README for the
-reasoning. What they do:
+reasoning, the two bugs that running it exposed, and the capture recipe.
+What they do:
 
 - an `msm8974_resources` table: 3 CSIPHY, 4 CSID, 1 ISPIF, 2 VFE, using the
   msm8916 (`CAMSS_8x16`, VFE 4.1) code paths, with msm8974's register names,
@@ -122,9 +123,11 @@ reasoning. What they do:
 - the camss node in `qcom-msm8974.dtsi`, with CMA sized for camera buffers
   on top of the GPU carveout
 
-**Done when** `media-ctl -p` shows the full CSIPHY → CSID → ISPIF → VFE graph,
-and a capture from a CSID test pattern generator produces frames. Neither can
-happen until the device tree node is flashed, which is the next step.
+**Done:** `media-ctl -p` shows the full CSIPHY → CSID → ISPIF → VFE graph —
+3 CSIPHY, 4 CSID, 4 ISPIF lines, 2 VFE, six video nodes — and CSID0's test
+pattern generator captures ten correct 1920x1080 SRGGB10 frames through
+ISPIF0 and VFE0 RDI0. No sensor is attached, so nothing past the ISP is
+proven.
 
 ## Stage 4 — front sensor driver (IMX132)
 
@@ -162,6 +165,6 @@ then Snapshot or Megapixels on Phosh.
                   └─► 3 CAMSS ──────────────────────────┴─► 6 userspace
                                      5 rear sensor ─────┘
 
-Stages 1 and 2 are done. **Stage 3 is now the blocker**: nothing downstream
-can be tested until camss registers a `/dev/video*` for a sensor driver to
-feed and for libcamera to open.
+Stages 1, 2 and 3 are done. **Stage 4 is now the blocker**, and its own
+blocker is not the driver but the data: the IMX132's register and mode tables
+are in no kernel and have to be recovered from the stock camera blobs.

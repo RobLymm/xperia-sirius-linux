@@ -9,9 +9,9 @@ touch, the sensors and the full 300 MHz to 2265.6 MHz range of all four CPU
 cores work. Audio works for the loudspeakers, earpiece, headphones and
 recording, and a call carries the caller's voice and anything the phone
 plays, but not yet what its microphone hears. The camera does not take
-pictures yet — the control bus, both sensors and the media core are working,
-the ISP and the sensor drivers are not — and suspend is off because resume
-loses Wi-Fi and touch.
+pictures yet, though everything up to the sensors does work: the control bus,
+the media core and the ISP all run, and only the two sensor drivers are
+missing. Suspend is off because resume loses Wi-Fi and touch.
 
 **If you have a Z2 and want it running like this one, start with
 [docs/from-stock-to-this.md](docs/from-stock-to-this.md).** It is the whole
@@ -59,7 +59,7 @@ the others listed there.
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
-| Camera | Not working, two stages done | The control bus and the media core both work, and the ISP driver is written but has never run. Both sensors are identified from the silicon over CCI — rear **IMX200**, front **IMX132** — and the V4L2 media core is built and loaded, which turned out to need no kernel rebuild and no flash because every part of it is a module. What is missing is the ISP: msm8974 CAMSS exists only as a 5.17-era Nexus 5 patch and must be re-expressed for 6.16, and until it registers a `/dev/video*` nothing downstream can be tested. Then two sensor drivers that exist nowhere. `docs/camera.md`, `docs/camera-plan.md`, `docs/handover-camera.md` |
+| Camera | No pictures yet, but the ISP works | Everything up to the sensors is working. Both are identified from the silicon over CCI — rear **IMX200**, front **IMX132** — the V4L2 media core is built and loaded, and msm8974 CAMSS now probes and captures: `media-ctl` shows the full CSIPHY → CSID → ISPIF → VFE graph and CSID0's test pattern generator produces correct 1920x1080 SRGGB10 frames. What is left is the two sensor drivers, which exist nowhere and whose register tables are in no kernel — not even Sony's. `docs/camera.md`, `docs/camera-plan.md`, `drivers/camera/` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. ModemManager can enable it directly with `--location-enable-gps-nmea`. A fix needs sky. `modem/` |
 | Mobile data | Working | A bearer comes up through NetworkManager and `wwan0` gets an address; verified by pinging and fetching a page bound to that interface rather than trusting the default route. On GPRS it is slow, and the modem has not yet been persuaded to carry data on anything faster. `modem/`, `docs/modem.md` |
 | SMS | Working | Sending and receiving both tested |
@@ -103,7 +103,7 @@ from the device on 2026-09-19.
 | Autofocus actuator | Rohm BU64296G | Detected, no driver | At 0x0c on the rear camera bus |
 | Camera module EEPROMs | | Readable | Both, at 0x50. Carry the module and sensor part numbers as ASCII |
 | Camera control bus | Qualcomm CCI | Working | Both masters enumerate; mainline `i2c-qcom-cci` binds |
-| Camera ISP | Qualcomm CAMSS | Not working, patches written | msm8974 support re-expressed for 6.16 and compiling, but not yet run: the driver cannot bind until its device tree node is flashed. `drivers/camera/` |
+| Camera ISP | Qualcomm CAMSS | Working | msm8974 support re-expressed for 6.16: 3 CSIPHY, 4 CSID, 4 ISPIF lines, 2 VFE, six video nodes. Probes clean and captures frames from the CSID test pattern generator. No sensor attached yet. `drivers/camera/` |
 | V4L2 media core | | Working | `mc`, `videodev` and the `videobuf2` set built out of tree and loaded. No `/dev/video*` yet: nothing registers one |
 
 Read `docs/known-problems.md` before relying on any of this. The one that
@@ -132,8 +132,8 @@ renderer.
     drivers/touch/      touchscreen: the MAX1187x driver the phone runs,
                         with two fixes; not yet in the kernel package
     drivers/camera/     camera ISP: msm8974 support for mainline's CAMSS
-                        driver, and its device tree node. Compiles; has
-                        never run, because binding needs a flash
+                        driver, and its device tree node. Captures frames
+                        from the CSID test pattern generator
     panel-variants/     the six panel configurations extracted from stock,
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs

@@ -29,15 +29,14 @@ the blob itself, or the DTB inside an image known to boot.
 A worked example, 2026-09-19, after the camera tree was flashed. Against the
 phone's own live tree:
 
-    tools/dt-equiv.py images/boot-cam-v2.img live.dtb
-    604 nodes compared, 0 differences
+    tools/dt-equiv.py images/boot-camss-v1.img live.dtb
+    606 nodes compared, 0 differences
 
-    tools/dt-equiv.py images/boot-voice-v1.img live.dtb
-    601 nodes compared, 8 differences
+    tools/dt-equiv.py images/boot-cam-v2.img live.dtb
+    604 nodes compared, 2 differences
 
 The first names what the phone is running. The second is the image it ran
-before, and its eight differences are the camera changes — the `cci` node's
-status, clocks and clock-names, and the always-on regulators. Node counts are
+before, and its two differences are the camss node and its `ports`. Node counts are
 the quick tell that nothing was dropped: the images that cost the evening
 below were built on a tree with fewer nodes, and this check would have said so
 in a second.
@@ -109,11 +108,11 @@ is old, check the phone before believing it.
 Checked on the device on 2026-09-19. The phone works; a phone built only from
 what is packaged here would not, and these are the reasons.
 
-**Thirty-three of the modules the phone has loaded are hand-built**, from
+**Thirty-four of the modules the phone has loaded are hand-built**, from
 `/lib/modules/6.16.12/updates`, not from the kernel package: the whole QDSP6
 audio stack, the WCD9320 codec, the SLIMbus NGD controller, the PM8941 clock
 divider, the q6voice set, the panel driver, the battery pair, the touchscreen,
-the CCI controller and the eleven V4L2 media core modules. Display, touch,
+the CCI controller, the eleven V4L2 media core modules and camss. Display, touch,
 battery, audio and the camera bus therefore currently depend on modules nobody
 else can obtain by installing packages.
 
@@ -152,12 +151,12 @@ else can obtain by installing packages.
   starts by installing postmarketOS as an Xperia Z3 and layering the Z2 on top.
 
 **Camera: the control bus and the media core work, and neither is packaged.**
-The phone runs `images/boot-cam-v2.img` — confirmed against `/sys/firmware/fdt`,
-604 nodes, 0 differences — so `cci@fda0c000` is enabled and both sensors
-answer. `i2c-qcom-cci` is hand-built in `/lib/modules/6.16.12/updates/cci/`,
-and the eleven V4L2 media core modules are hand-built in
+The phone runs `images/boot-camss-v1.img` — confirmed against
+`/sys/firmware/fdt`, 606 nodes, 0 differences — so `cci@fda0c000` is enabled,
+both sensors answer, and the camss node is present and bound. `i2c-qcom-cci` is hand-built in `/lib/modules/6.16.12/updates/cci/`, and the
+eleven V4L2 media core modules plus `qcom-camss.ko` are hand-built in
 `/lib/modules/6.16.12/updates/media/`. Nothing in the kernel package builds
-either.
+any of them.
 
 The board file now does carry the camera device tree changes that image has —
 the `cci` node's clocks and status, `lvs2`, `l3` and `l23` held on, and the

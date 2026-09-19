@@ -7,8 +7,10 @@ more of them, and the ISPIF is v3.0, which behaves like msm8996's.
 
 That split is why this adds CAMSS_8x74 rather than reusing CAMSS_8x16. Of the
 places camss branches on SoC version, msm8974 goes with 8x16 for the CSID
-source-pad format and with 8x96 for the ISPIF register layout and interrupt
-handler, so neither existing value is correct on its own.
+source-pad format and the VFE source-pad format, and with 8x96 for the ISPIF
+register layout, line count and interrupt handler. Neither existing value is
+correct on its own: msm8974 enumerates four ISPIF lines, where 8x16 would give
+two.
 
 msm8974's camera subsystem has no IOMMU, so camss cannot depend on IOMMU_DMA
 and cannot hand the VFE a scatter-gather list. Choose the buffer allocator
@@ -16,18 +18,23 @@ from whether the device is actually behind an IOMMU, rather than by SoC:
 contiguous memory from CMA where there is none, scatter-gather where an
 IOMMU can make a fragmented buffer look contiguous.
 
-Every clock the tables name is already in mainline's mmcc-msm8974. msm8974
-has no plain CAMSS_AHB_CLK, so unlike msm8916 there is no "ahb" entry;
-"top_ahb" is CAMSS_TOP_AHB_CLK. VFE rates are ftbl_camss_vfe_vfe0_1_clk.
-Both VFEs share one CAMSS_VFE_GDSC, so there is no per-VFE has_pd and the
-power domain belongs on the camss node, as on msm8916.
+The VFE clock_rate table stops at 400 MHz rather than following
+ftbl_camss_vfe_vfe0_1_clk to 465 MHz. That last entry is
+F(465000000, P_MMPLL3, ...), but vfe0_clk_src's parent map in mmcc-msm8974 is
+mmcc_xo_mmpll0_mmpll1_gpll0_map, which has no MMPLL3, so the rate is
+unreachable and clk_round_rate returns -ENOENT. It matters because with no
+sensor attached camss asks for the highest rate in the list.
 
-Register addresses and interrupt numbers agree across three independent
-derivations: Sony's published msm8974-camera.dtsi, the stock device tree read
-off an Xperia Z2, and z3ntu's Nexus 5 work.
+Every other clock the tables name is already in mmcc-msm8974. msm8974 has no
+plain CAMSS_AHB_CLK, so unlike msm8916 there is no "ahb" entry; "top_ahb" is
+CAMSS_TOP_AHB_CLK. Both VFEs share one CAMSS_VFE_GDSC, so there is no per-VFE
+has_pd and the power domain belongs on the camss node, as on msm8916.
 
-Compile-tested against 6.16.12 as an out-of-tree module. NOT yet tested on
-hardware: it needs the camss device tree node, which needs a flash.
+Tested on an Xperia Z2 (msm8974pro): the driver probes clean, media-ctl shows
+the full CSIPHY -> CSID -> ISPIF -> VFE graph with three CSIPHYs, four CSIDs,
+four ISPIF lines and two VFEs of three RDI lines each, and a capture from
+CSID0's test pattern generator produces correct frames -- 1920x1080 SRGGB10
+packed, 2592000 bytes each, carrying the expected ramp.
 
 --- a/drivers/media/platform/qcom/camss/Kconfig	2026-09-19 10:34:25.385899887 +0100
 +++ b/drivers/media/platform/qcom/camss/Kconfig	2026-09-19 10:35:41.081862316 +0100
@@ -43,8 +50,8 @@ hardware: it needs the camss device tree node, which needs a flash.
  	select VIDEOBUF2_DMA_SG
  	select V4L2_FWNODE
 --- a/drivers/media/platform/qcom/camss/camss.c	2026-09-19 10:34:25.383619169 +0100
-+++ b/drivers/media/platform/qcom/camss/camss.c	2026-09-19 10:35:02.425460870 +0100
-@@ -290,6 +290,220 @@
++++ b/drivers/media/platform/qcom/camss/camss.c	2026-09-19 13:41:09.538495601 +0100
+@@ -290,6 +290,240 @@
  	}
  };
  
@@ -220,10 +227,20 @@ hardware: it needs the camss device tree node, which needs a flash.
 +			   "vfe_ahb", "vfe_axi" },
 +		.clock_rate = { { 0 },
 +				{ 0 },
++				/*
++				 * ftbl_camss_vfe_vfe0_1_clk minus its 465 MHz
++				 * entry, which msm8974 cannot actually reach:
++				 * that entry is F(465000000, P_MMPLL3, ...) but
++				 * vfe0_clk_src's parent map is
++				 * mmcc_xo_mmpll0_mmpll1_gpll0_map, which has no
++				 * MMPLL3. Asking for it makes clk_round_rate
++				 * return -ENOENT, and with no sensor attached
++				 * camss asks for the highest rate in this list.
++				 */
 +				{ 37500000, 50000000, 60000000, 80000000,
 +				  100000000, 109090000, 133330000, 200000000,
-+				  228570000, 266670000, 320000000, 400000000,
-+				  465000000 },
++				  228570000, 266670000, 320000000,
++				  400000000 },
 +				{ 0 },
 +				{ 0 },
 +				{ 0 } },
@@ -244,10 +261,20 @@ hardware: it needs the camss device tree node, which needs a flash.
 +			   "vfe_ahb", "vfe_axi" },
 +		.clock_rate = { { 0 },
 +				{ 0 },
++				/*
++				 * ftbl_camss_vfe_vfe0_1_clk minus its 465 MHz
++				 * entry, which msm8974 cannot actually reach:
++				 * that entry is F(465000000, P_MMPLL3, ...) but
++				 * vfe0_clk_src's parent map is
++				 * mmcc_xo_mmpll0_mmpll1_gpll0_map, which has no
++				 * MMPLL3. Asking for it makes clk_round_rate
++				 * return -ENOENT, and with no sensor attached
++				 * camss asks for the highest rate in this list.
++				 */
 +				{ 37500000, 50000000, 60000000, 80000000,
 +				  100000000, 109090000, 133330000, 200000000,
-+				  228570000, 266670000, 320000000, 400000000,
-+				  465000000 },
++				  228570000, 266670000, 320000000,
++				  400000000 },
 +				{ 0 },
 +				{ 0 },
 +				{ 0 } },
@@ -265,7 +292,7 @@ hardware: it needs the camss device tree node, which needs a flash.
  static const struct resources_icc icc_res_8x53[] = {
  	{
  		.name = "cam_ahb",
-@@ -3586,6 +3800,7 @@
+@@ -3586,6 +3820,7 @@
  
  	if (camss->res->version == CAMSS_8x16 ||
  	    camss->res->version == CAMSS_8x53 ||
@@ -273,7 +300,7 @@ hardware: it needs the camss device tree node, which needs a flash.
  	    camss->res->version == CAMSS_8x96) {
  		camss->ispif = devm_kcalloc(dev, 1, sizeof(*camss->ispif), GFP_KERNEL);
  		if (!camss->ispif)
-@@ -3729,6 +3944,18 @@
+@@ -3729,6 +3964,18 @@
  	.link_entities = camss_link_entities
  };
  
@@ -292,7 +319,7 @@ hardware: it needs the camss device tree node, which needs a flash.
  static const struct camss_resources msm8953_resources = {
  	.version = CAMSS_8x53,
  	.icc_res = icc_res_8x53,
-@@ -3865,6 +4092,7 @@
+@@ -3865,6 +4112,7 @@
  
  static const struct of_device_id camss_dt_match[] = {
  	{ .compatible = "qcom,msm8916-camss", .data = &msm8916_resources },
@@ -374,6 +401,16 @@ hardware: it needs the camss device tree node, which needs a flash.
  		 camss->res->version == CAMSS_660)
  		ret = devm_request_irq(dev, ispif->irq, ispif_isr_8x96,
  			       IRQF_TRIGGER_RISING, ispif->irq_name, ispif);
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c	2026-09-19 10:34:25.385777773 +0100
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c	2026-09-19 13:42:41.046962538 +0100
+@@ -291,6 +291,7 @@
+ 	switch (vfe->camss->res->version) {
+ 	case CAMSS_8x16:
+ 	case CAMSS_8x53:
++	case CAMSS_8x74:
+ 		switch (sink_code) {
+ 		case MEDIA_BUS_FMT_YUYV8_1X16:
+ 		{
 --- a/drivers/media/platform/qcom/camss/camss-video.c	2026-09-19 10:34:25.383875395 +0100
 +++ b/drivers/media/platform/qcom/camss/camss-video.c	2026-09-19 10:35:41.081506337 +0100
 @@ -7,12 +7,14 @@

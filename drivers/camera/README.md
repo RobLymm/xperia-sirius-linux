@@ -7,17 +7,28 @@ subsystem state, the hardware map and the sensor work are in
 [`../../docs/camera.md`](../../docs/camera.md); this file is about the
 patches.
 
-**The module builds and loads; the driver has never bound to anything.**
-`qcom-camss.ko` links clean against 6.16.12 out of tree, loads, and registers
-at `/sys/bus/platform/drivers/qcom-camss` — but there is no device for it
-until the camss node is in a flashed image, so no probe path has run. Treat
-every claim below about the hardware as reasoned from the register maps, not
-observed.
+**They work.** On an Xperia Z2 the driver probes clean, `media-ctl` shows the
+full CSIPHY → CSID → ISPIF → VFE graph, and a capture from CSID0's test
+pattern generator produces correct frames. What has not been tested is a real
+sensor, because no sensor driver exists yet.
 
 | | |
 |---|---|
 | `0001-media-camss-add-msm8974-support.patch` | the driver: resource tables, a new SoC version, and a buffer path that works without an IOMMU |
 | `0002-ARM-dts-qcom-msm8974-add-the-camss-node.patch` | the node, disabled by default; a board enables it |
+
+## What it enumerates
+
+    3 CSIPHY      msm_csiphy0-2
+    4 CSID        msm_csid0-3
+    4 ISPIF lines msm_ispif0-3
+    2 VFE         msm_vfe0_rdi0-2, msm_vfe1_rdi0-2
+    6 video nodes msm_vfe{0,1}_video{0,1,2}  ->  /dev/video0-5
+                  plus /dev/media0 and 17 subdevs
+
+The four ISPIF lines are worth noticing: they are the direct evidence that
+msm8974 belongs with msm8996 and not msm8916 for the ISPIF, because msm8916's
+code path gives two.
 
 ## Why msm8974 needs its own version enum
 
@@ -25,7 +36,7 @@ The obvious move is to reuse `CAMSS_8x16`: msm8974's blocks are the same
 generation as msm8916's — 2-phase CSIPHY, CSID 4.1, VFE 4.1 — and that is
 what z3ntu's Nexus 5 work did, binding to `qcom,msm8916-camss` outright.
 
-It is wrong, and quietly. camss branches on `res->version` in four places,
+It is wrong, and quietly. camss decides things by SoC version in five places,
 and msm8974 does not fall on the same side at all of them:
 
 | site | what it decides | msm8974 goes with |
@@ -33,12 +44,13 @@ and msm8974 does not fall on the same side at all of them:
 | `camss.c`, allocating the ISPIF | whether there is an ISPIF at all | 8x16/8x53/8x96 |
 | `camss-csiphy.c`, `base_clk_mux` | whether to map the CSIPHY clock mux register | 8x16/8x53/8x96 |
 | `camss-csid.c`, `csid_src_pad_code` | 8x16 passes the sink code through, later parts remap it | **8x16** |
+| `camss-vfe.c`, `vfe_src_pad_code` | which source codes a sink code can produce | **8x16** |
 | `camss-ispif.c`, ×4 | ISPIF register layout, line count and interrupt handler | **8x96** |
 
-msm8974's ISPIF reports `qcom,ispif-v3.0` in Sony's tree and has four CSIDs,
-so it needs `ispif_isr_8x96` and `line_num = 4`. Reusing `CAMSS_8x16` gives it
-the 8x16 handler and two lines; reusing `CAMSS_8x96` gives it the wrong CSID
-format path. Hence `CAMSS_8x74`, added on the correct side of each.
+The VFE one is a `switch` rather than a chain of `==` comparisons, so it is
+easy to miss when grepping — and missing it is not silent. Its `default:` is
+`WARN(1, "Unsupported HW version")`, which fires during probe with a full call
+trace. That is how it was found.
 
 ## The buffer path
 
@@ -61,29 +73,38 @@ Instead the allocator is chosen from the device rather than the SoC:
             q->mem_ops = &vb2_dma_contig_memops;
 
 with the matching branch in `video_buf_init()`. That is a property of the
-hardware, not a quirk table, and should be acceptable upstream.
+hardware, not a quirk table, and should be acceptable upstream. It is the path
+the test-pattern capture below actually used.
 
 Contiguous buffers come from CMA, and 20 MP RAW10 frames are large: the
 phone's command line already carries `cma=768M` alongside `msm.vram=512m` for
-the GPU. Whether that is enough for a full-resolution queue is untested.
+the GPU. 1920x1080 works; a full-resolution queue is untested.
 
-## Clocks
+## Clocks, and one unreachable rate
 
 Every clock the resource tables name is already in mainline's
-`mmcc-msm8974`; none had to be added. Two differences from msm8916 worth
-knowing:
+`mmcc-msm8974`; none had to be added. Three things differ from msm8916:
 
 - msm8974 has **no plain `CAMSS_AHB_CLK`**. msm8916's tables list an `"ahb"`
   clock and msm8974 has only `CAMSS_TOP_AHB_CLK` and `CAMSS_MICRO_AHB_CLK`,
-  so there is no `"ahb"` entry here. If a block turns out to need one,
-  `TOP_AHB` is the candidate.
+  so there is no `"ahb"` entry here, and the driver does not miss it.
 - Both VFEs share a single `CAMSS_VFE_GDSC`, so there is no per-VFE
   `has_pd`/`pd_name` as on msm8953; the power domain goes on the camss node,
-  as on msm8916. The domain is registered and visible as `camss_vfe` in
-  `pm_genpd_summary`.
+  as on msm8916. It appears as `camss_vfe` in `pm_genpd_summary`.
+- **The VFE rate list stops at 400 MHz, deliberately.** msm8974's
+  `ftbl_camss_vfe_vfe0_1_clk` ends with `F(465000000, P_MMPLL3, 2, 0, 0)`, but
+  `vfe0_clk_src`'s parent map is `mmcc_xo_mmpll0_mmpll1_gpll0_map`, which has
+  no MMPLL3. That entry is unreachable and `clk_round_rate` returns `-ENOENT`
+  for it. It matters because **with no sensor attached camss asks for the
+  highest rate in the list**, so the first thing that happens on opening
+  `/dev/video0` is:
 
-VFE rates are `ftbl_camss_vfe_vfe0_1_clk`, CSI and CSIPHY-timer rates are
-100 and 200 MHz.
+      qcom-camss fda0ac00.camss: clk round rate failed: -2
+      qcom-camss fda0ac00.camss: Failed to power up pipeline: -22
+
+  and the node cannot be opened at all. Whether the real fix belongs in
+  `mmcc-msm8974` — giving `vfe0_clk_src` a parent map that includes MMPLL3 —
+  is worth asking upstream. Dropping the rate here is the conservative half.
 
 ## Building it
 
@@ -98,72 +119,44 @@ needs. Then:
       J=3 ./kbuild-mod.sh drivers/media/platform/qcom/camss \
           CONFIG_VIDEO_QCOM_CAMSS=m
 
-## What has been checked, and what has not
+Rebuilding the module needs no flash, so iterating on the driver is fast. Only
+a device tree change needs one.
 
-Checked:
+## Capturing from the test pattern generator
 
-- `qcom-camss.ko` links with no unresolved symbols, loads, and registers its
-  platform driver, pulling in the media core as dependencies.
-- The device tree change produces exactly ten differences against the tree
-  before it — the camss node and its `ports`, the `lvs2` regulator, the two
-  camera MCLK pin states, `regulator-always-on` on `l3` and `l23`, and the
-  `cci` node's clocks, clock-names and status — and nothing else.
-- Addresses and interrupts agree across three independent derivations:
-  Sony's published `msm8974-camera.dtsi`, the stock device tree read off the
-  device, and z3ntu's Nexus 5 work.
+This is the check that proves the pipeline end to end without a sensor. CSID0
+generates the frames, and they travel ISPIF0 → VFE0 RDI0 → `/dev/video0`.
 
-Not checked, because it needs a flash:
+    media-ctl -d /dev/media0 -l '"msm_csid0":1->"msm_ispif0":0[1]'
+    media-ctl -d /dev/media0 -l '"msm_ispif0":1->"msm_vfe0_rdi0":0[1]'
+    media-ctl -d /dev/media0 -V '"msm_csid0":0[fmt:SRGGB10_1X10/1920x1080]'
+    media-ctl -d /dev/media0 -V '"msm_ispif0":0[fmt:SRGGB10_1X10/1920x1080]'
+    media-ctl -d /dev/media0 -V '"msm_vfe0_rdi0":0[fmt:SRGGB10_1X10/1920x1080]'
+    v4l2-ctl -d /dev/v4l-subdev3 --set-ctrl test_pattern=1
+    v4l2-ctl -d /dev/video0 --set-fmt-video=width=1920,height=1080,pixelformat=pRAA
+    v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=10 --stream-to=/tmp/tpg.raw
 
-- that the driver probes at all — nothing past `platform_driver_register` has
-  executed;
-- that the ISPIF and dual-VFE paths behave — 8x16 ships one VFE, so two is
-  new ground;
-- that `media-ctl -p` shows the CSIPHY → CSID → ISPIF → VFE graph;
-- that a CSID test pattern produces frames.
+`v4l-utils` is not installed by default; `apk add v4l-utils`. The subdev
+numbers move between boots, so read them from `/sys/class/video4linux/*/name`
+rather than assuming `v4l-subdev3` is CSID0.
 
-The first flash is worth doing before either sensor driver is written: it
-turns the whole of the rest of the camera work from theory into something
-testable.
+Result on 2026-09-19: ten frames, 2,592,000 bytes each, which is exactly
+1920 × 1080 × 10 / 8 for packed SRGGB10. The content is the generator's ramp —
+row 0 begins `00 01 02 03`, row 540 begins `80 81 82 83`, all 256 byte values
+present, 0.4% zeros, and successive frames identical as a static pattern
+should be. No errors in dmesg.
 
-## The image to flash
+## What is not done
 
-`images/boot-camss-v1.img`, also on the phone at `~/boot-camss-v1.img`. It is
-**the image the phone is already running with the camss node added and nothing
-else changed**, which is why it was built by editing that image's device tree
-rather than from source: the repository cannot yet rebuild the running tree.
-Building the codec variant from the board file and patch 0012 still lands 87
-differences and 35 nodes short of what the phone runs — thermal trip points,
-remoteproc power domains and interconnect clocks that came from kernel patches
-not published here. A source-built image would therefore be a regression, so
-this one reuses `boot-cam-v2.img`'s own kernel, ramdisk and command line
-byte for byte.
-
-What was checked before handing it over:
-
-    tail of the kernel is exactly cam-v2.dtb                     cmp: equal
-    ramdisk, cmdline, vmlinuz after repack                       all equal
-    strings -a boot-camss-v1.img | grep -c msm.vram=512m         1
-    strings -a boot-camss-v1.img | grep -c max1187x              1
-    dt-equiv.py boot-camss-v1.img live.dtb    604 nodes, 2 differences
-                                              /soc/camss@fda0ac00 and its ports
-
-and inside the node, read back out of the built blob: 31 clocks and the
-power domain all resolving to `/soc/clock-controller@fd8c0000`, power-domain
-index 3 (`CAMSS_VFE_GDSC`), 14 reg ranges, 10 interrupts, and `status =
-"okay"` — the SoC patch leaves it disabled, and this image is what a board
-file enabling it would produce.
-
-The backup taken from the boot partition **before** flashing, as the rules
-require, is `images/boot-backup-before-camss.img`. Its first 17803264 bytes
-are byte-identical to `boot-cam-v2.img`, which independently confirms what the
-phone was running.
-
-`qcom-camss.ko` is already installed at
-`/lib/modules/6.16.12/updates/media/`, so after flashing:
-
-    sudo modprobe qcom-camss
-    dmesg | tail -40
-    media-ctl -p          # if v4l-utils is installed
-
-The interesting question is whether probe gets through the clocks and the VFE
-GDSC. Expect it not to work first time.
+- **No sensor has been attached**, because neither sensor driver exists. Every
+  claim above is about the ISP, not about the cameras.
+- **`vdda-supply` is missing from the node.** Sony's tree gives the CSIDs
+  `pm8941_l12` at 1.8 V; without it the driver logs `supply vdda not found,
+  using dummy regulator` four times at probe. Harmless for the test pattern,
+  which needs no MIPI signalling, but it has to be added before a real sensor
+  is wired up — and that needs another flash.
+- **Only VFE0 RDI0 has been exercised.** The dual-VFE paths and the PIX
+  (format-converting) lines are untouched; 8x16 ships one VFE, so two is new
+  ground.
+- **Only 1920x1080.** Nothing has been tried at 20 MP, where the CMA
+  reservation is the thing to watch.
