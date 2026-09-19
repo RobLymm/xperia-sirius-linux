@@ -1,5 +1,7 @@
 # Known problems
 
+Last verified against the device on 2026-09-19.
+
 The things that will bite you, and what is understood about each.
 
 ## Applications rendering on the GPU hang it

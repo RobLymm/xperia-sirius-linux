@@ -7,3 +7,7 @@
 Module.symvers
 modules.order
 __pycache__/
+
+# The radio app lives in its own repository, RobLymm/robwatts-fm-radio.
+# A copy here would drift; the README links to it instead.
+apps/

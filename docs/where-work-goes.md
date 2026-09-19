@@ -41,6 +41,40 @@ all eight being the intended ones. Equal node counts are the quick tell that
 nothing was dropped: the images that cost the evening below were built on a
 tree with fewer nodes, and this check would have said so in a second.
 
+## Which document holds which kind of fact
+
+Thirty-odd markdown files is enough to lose a fact in, and the way this goes
+wrong is the same as with device trees: two places say the same thing, one
+gets updated, and the other quietly becomes a lie. Three claims in this
+repository were wrong for weeks that way — CPU scaling recorded as broken
+while the phone ran its full rated range, the light sensor recorded as dead
+while it reported the room, and a "what is left" page still saying the modem
+stalls after it had started making calls.
+
+So each kind of claim has one home, and everything else links to it.
+
+| Kind of claim | The one place | Everywhere else |
+|---|---|---|
+| What works and what does not | the state table in `../README.md` | link to it, do not restate |
+| How big an unfinished thing is, and why | `whats-left.md` | |
+| What to do next, and what proves it done | `todo.md` | |
+| A fault's symptoms, diagnosis and dead ends | `known-problems.md` | |
+| Where work goes; gaps between repo and phone | this file | |
+| How a stranger installs the port | `from-stock-to-this.md` | |
+| One subsystem in depth | `<subsystem>.md`, or the driver's own README | |
+
+**Versions and changelogs.** Documents here carry neither, deliberately: git
+is the changelog, and a hand-maintained one would be a second thing to forget
+to update. What they do carry, wherever they assert something about the
+device, is a line saying when that was last checked:
+
+    Last verified against the device on <date>.
+
+That date is the useful thing. It tells a reader how much to trust the page
+without reading the git log, and it makes staleness visible instead of
+silent. If you change a claim, move the date. If you read a page whose date
+is old, check the phone before believing it.
+
 ## Canonical places
 
 | Work | The one place it belongs |

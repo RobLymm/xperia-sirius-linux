@@ -1,5 +1,7 @@
 # To do, and how each is proven done
 
+Last verified against the device on 2026-09-19.
+
 The ordered work, then the capability checklist to run once it is finished.
 `whats-left.md` says how big each item is and why; this file says what to do
 next and what "done" means.

@@ -1,5 +1,7 @@
 # What is left
 
+Last verified against the device on 2026-09-19.
+
 The gap between this phone and one someone could use as their only phone,
 ordered by whether it blocks that.
 

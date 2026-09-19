@@ -34,6 +34,8 @@ apply to all four devices, not only the Z2.
 
 ## State of each subsystem
 
+Last verified against the device on 2026-09-19.
+
 The first twenty-two rows are the columns of the postmarketOS device table, in
 the same order, so this phone can be compared directly with the Xperia Z3 and
 the others listed there.
@@ -101,7 +103,8 @@ renderer.
     modem/              what Sony's modem firmware needs from the AP (TA services),
                         the ta-service fix, and a QMI service honeypot
     docs/               identification, extraction, prior art, and what each
-                        unfinished part costs
+                        unfinished part costs. Start with where-work-goes.md,
+                        which says which document holds which kind of fact
 
 ## Two device trees, and why
 

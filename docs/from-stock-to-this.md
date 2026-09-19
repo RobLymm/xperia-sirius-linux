@@ -29,7 +29,7 @@ Verified working on the phone this was developed on:
 
 Not working: camera, NFC, suspend and resume, CPU frequency scaling above
 960 MHz, the secondary and headset microphones, headphone jack detection.
-`known-problems.md` and `remaining-hardware.md` have the detail.
+`known-problems.md` has the detail, and `whats-left.md` the size of what is unfinished.
 
 ## Two warnings
 

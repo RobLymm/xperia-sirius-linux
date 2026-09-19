@@ -1,5 +1,7 @@
 # Camera: the ISP is nearly solved, the sensors are not
 
+Last verified against the device on 2026-09-19.
+
 The staged bring-up plan is in `camera-plan.md`.
 
 Not working, not attempted on this device. But the hard-looking part turns out
