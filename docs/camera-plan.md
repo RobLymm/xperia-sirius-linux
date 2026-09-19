@@ -1,5 +1,8 @@
 # Camera bring-up plan
 
+For the current state and how to reproduce it, read `handover-camera.md`
+first.
+
 The staged plan for getting both Xperia Z2 cameras working on a mainline
 kernel. `camera.md` has the hardware map and the prior art; this file is the
 order of work, what each stage needs and how each is proven done.
