@@ -25,6 +25,57 @@ changing nothing.
 A real fix is kernel side. A GPU hang core dump was captured and is the
 starting point for anyone wanting to work on it.
 
+## The GPU memory shrinker can crash and take the compositor with it
+
+Seen on 2026-09-19. The phone was left on and plugged in, and the touchscreen
+stopped responding. It was not the touchscreen — the max1187x driver was
+loaded, bound, and its input device still carried events.
+
+What had actually happened is in `dmesg`:
+
+    Unable to handle kernel NULL pointer dereference at virtual address 00000014
+    Internal error: Oops: 5 [#2] SMP ARM
+    PC is at msm_gem_purge+0x100/0x15c
+    Process kswapd0
+
+    msm_gem_purge <- purge <- drm_gem_lru_scan <- msm_gem_shrinker_scan
+                  <- do_shrink_slab <- shrink_slab <- shrink_one
+                  <- shrink_node <- balance_pgdat <- kswapd
+
+Under memory pressure the kernel ran the MSM GEM shrinker, which dereferenced
+a null pointer while purging a buffer object. That killed **kswapd0**, so
+memory reclaim stopped working, and it died inside the GEM locks. phoc's main
+thread then blocked in `msm_gem_madvise` on the same lock and stayed in
+uninterruptible sleep:
+
+    ps -o pid,stat,wchan -p $(pgrep -x phoc)
+    16141 D msm_gem_madvise
+
+A compositor whose main thread is in D state draws nothing and reads no input,
+so the screen freezes and touch looks dead. `grim` hangs too, which is a quick
+way to tell this apart from a touch fault.
+
+**There is no recovery but a reboot.** A thread in uninterruptible sleep on a
+lock whose holder has died cannot be killed.
+
+How to tell it from the touchscreen bug below: check whether phoc is wedged
+before blaming touch.
+
+    pgrep -x phoc                       # still running?
+    ps -o stat,wchan -p $(pgrep -x phoc)  # D state in msm_gem_* means this bug
+    grim /tmp/x.png                     # hangs, rather than failing
+
+**What set it off is not certain.** The session that hit it had been running
+the camera hard, and libcamera's EGL debayer was failing on every frame for
+part of it — see `../drivers/camera/README.md`. Failed GPU debayer passes
+leaking GEM objects would explain a shrinker being driven hard enough to reach
+a rare path. A large disk cleanup ran shortly before, which would also have
+pushed the page cache. Neither is proven.
+
+It is probably related to the GPU hangs above: the same driver, and the same
+pattern of a mainline msm driver on this SoC being exercised in ways nobody
+else exercises it.
+
 ## The GPU needs a VRAM carveout, and the size matters
 
 msm8974 has no GPU IOMMU support in mainline, so the GPU is given a contiguous

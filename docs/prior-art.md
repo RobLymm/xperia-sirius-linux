@@ -122,6 +122,30 @@ Worth checking before writing any new driver for this phone — and worth
 checking *which branch*, because the sirius-specific files are not all on the
 newest one.
 
+### How to read it, and which revision a finding came from
+
+`upstream-src/sony-kernel` is a **partial clone** (`filter=blob:none`) of
+`sonyxperiadev/kernel`. The commit tree lists 42,256 files and any of them
+fetches on demand, so a file does not have to be in the sparse checkout to be
+read. `tools/sony-src.sh` prints one:
+
+    sony-src.sh drivers/input/touchscreen/max1187x.c
+    sony-src.sh -b 3.5.1 drivers/media/.../sony_camera_v4l2.c
+    sony-src.sh -l camera_v2/sensor      # list matching paths
+    sony-src.sh -B                       # branches and commits
+
+It prints the branch and commit to stderr, so a finding can cite the revision
+it was read at. The three branches that matter:
+
+| Shorthand | Branch | Commit | What is on it |
+|---|---|---|---|
+| `default` | `aosp/LNX.LA.3.5.2.2-03010-8x74.0` | `ba9f9c5d` | Sirius device tree, camera_v2, most drivers |
+| `3.5.1` | `aosp/LNX.LA.3.5.1-01110-8x74.0` | `38838c6e` | `sony_camera_v4l2.c`, dropped from the newer branch |
+| `5.5` | `aosp/LA.UM.5.5.r1` | `4bc2f4cd` | `drivers/bluetooth/broadcom/`, including a complete V4L2 FM driver |
+
+Findings from reading it are collected in `sony-source-audit.md`, with the
+outstanding work in `whats-left.md`.
+
 ## The stock camera stack, and why there is no table to lift
 
 Read on 2026-09-19, because the register sequences had to be somewhere and it
