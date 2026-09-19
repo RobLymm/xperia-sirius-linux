@@ -30,6 +30,8 @@ Z2 Tablet (castor) — are all supported, and share
 display, GPU, audio or sensor support, so several parts of this repository
 apply to all four devices, not only the Z2.
 
+**Working on this port?** Read [docs/where-work-goes.md](docs/where-work-goes.md) first. It says which files are canonical, which are stale or deprecated, and how to check what the phone is actually running.
+
 ## State of each subsystem
 
 The first twenty-two rows are the columns of the postmarketOS device table, in
