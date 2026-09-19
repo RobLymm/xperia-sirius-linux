@@ -6,10 +6,10 @@ order of work, what each stage needs and how each is proven done.
 
 ## What is already known
 
-**Sensors.** Rear: 20 MP with autofocus, part number unresolved — this unit's
-stock tuning file says **IMX200** (`SOI20BS0_IMX200.dat`), but public Z2/ZL2
-specs say **IMX220**. Settle it by reading the chip ID over CCI in stage 2
-before writing the stage-5 driver; do not assume. Front: a Sony **IMX132**
+**Sensors.** Rear: 20 MP with autofocus, **IMX200**, settled on 2026-09-19 by
+reading the chip ID over CCI (register 0x0016 -> 0x0200, five identical
+reads). The stock tuning file was right and the public Z2 specifications,
+which say IMX220, are wrong for this device. Front: a Sony **IMX132**
 (`LGI02BN1_IMX132.dat`, `SEM02BN1_IMX132.dat`, 2 MP, two module suppliers),
 fixed focus. Neither part has a mainline Linux driver (IMX132 exists only in
 the unusable `staging/media/atomisp`); `imx258`/`imx283` are the closest

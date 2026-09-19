@@ -32,13 +32,24 @@ Sony's stock system partition narrows the parts down: tuning files
 `LGI02BN1_IMX132.dat` / `SEM02BN1_IMX132.dat` (2 MP modules from two
 suppliers), plus a leftover `libchromatix_imx135_liveshot.so`.
 
-**Rear part number is unresolved: IMX200 vs IMX220.** This unit's stock tuning
-file names `IMX200`, which is the strongest evidence from the actual device.
-Public Xperia Z2 specs and the sibling ZL2 wiki instead say the 20.7 MP rear
-is a Sony **IMX220**. The two disagree; do not assume either. The chip's ID
-register, read over CCI once the bus is up (stage 2), is what settles it, and
-the driver written in stage 4 depends on the answer. Front is an IMX132, from
-two module vendors.
+**Rear part number: settled, it is an IMX200.** Read over CCI from the sensor
+itself on 2026-09-19, five identical reads:
+
+    rear  0x10  register 0x0016  ->  0x0200   IMX200
+    front 0x36  register 0x0000  ->  0x0132   IMX132
+
+So this unit's stock tuning file (`SOI20BS0_IMX200.dat`) was right and the
+public Xperia Z2 specifications, which say IMX220, are wrong for this device.
+Note the two sensors keep their model ID in different registers: the rear at
+0x0016 reads 0 at 0x0000, and the front at 0x0000 reads 0 at 0x0016.
+
+What else is on the two buses, from the same scan:
+
+| | rear bus (CCI master 0) | front bus (CCI master 1) |
+|---|---|---|
+| sensor | 0x10 | 0x36 |
+| EEPROM | 0x50-0x57 | 0x50-0x57 |
+| autofocus actuator | 0x0c | none, as expected |
 
 No mainline driver exists for IMX200, IMX220, IMX132 or IMX135 (IMX132 appears
 only in the old `staging/media/atomisp`, Intel-coupled and unusable here). The
@@ -240,3 +251,49 @@ dual-VFE ISPIF routing is the least-tested camss code; and the rear sensor's
 power and register sequence is the main reverse-engineering unknown (and which
 part it even is — see the IMX200/IMX220 question above). The front IMX132 is a
 later, separate effort.
+
+## Bringing the bus up by hand, and four traps
+
+Everything above was read with no camera driver at all: the CCI node enabled,
+the two master clocks hung off it, the rails held on, and the resets released
+from userspace. What it took, in order, because each of these was a dead end
+until it was right:
+
+1. **All four rails, `lvs2` included.** `l3` (1.2 V digital), `l17` (2.7 V
+   analogue) and `l23` (2.8 V focus) are not enough. `lvs2` is `vio`, the
+   sensors' I/O supply, and it powers their I2C interface: without it every
+   transfer returns `Operation timed out` and the bus looks broken. With it,
+   transfers return a normal NAK and the bus can be scanned. `lvs2` has no
+   node of its own in the tree and has to be given one.
+2. **The master clocks have to be running before a transfer.** The CCI driver
+   uses runtime PM and only enables its clocks for the duration of a
+   transfer, and a sensor needs its INCK running before it will answer at
+   all. Pin the bus awake:
+
+       echo on > /sys/bus/platform/devices/fda0c000.cci/power/control
+
+   The clocks are hung off the CCI node deliberately: the driver calls
+   `devm_clk_bulk_get_all()` and enables everything it finds, without
+   consulting names or positions, so clocks added at the end are simply
+   turned on with the bus.
+3. **The bus numbers move.** The CCI adapters are not a fixed `i2c-1` and
+   `i2c-2`: the numbering depends on when the module loads relative to the
+   QUP buses, and it changed between two boots of the same image. Resolve
+   them every time:
+
+       ls -d /sys/bus/platform/devices/fda0c000.cci/i2c-*
+
+   Scanning the wrong adapter finds the speaker amplifiers and the
+   accelerometer and looks like a camera result.
+4. **`i2cdetect` cannot probe these sensors.** It uses a one-byte read and
+   they are 16-bit addressed, so it reports nothing on a perfectly working
+   bus. Use `i2ctransfer` with an explicit register:
+
+       i2ctransfer -y -f <bus> w2@0x10 0x00 0x16 r2
+
+   It does find the EEPROMs and the actuator, which are byte addressed, so a
+   scan is still worth running once the bus is alive.
+
+Resets are TLMM 94 (rear) and 18 (front), released high, held from userspace
+with `gpioset --hold-period=… --chip gpiochip0 94=1 18=1`. A block read
+(`r16`) is rejected by the controller; read two bytes at a time.
