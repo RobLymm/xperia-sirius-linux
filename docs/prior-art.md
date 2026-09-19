@@ -74,6 +74,34 @@ the branch that took three attempts to find, and the reason this page exists.
 Also `z3ntu/msm-mainline-status`, a Qualcomm mainline status tracker, and
 `z3ntu/linux-mdss-dsi-panel-driver-generator`, the generator mentioned above.
 
+## Sony's own Open Devices sources — not yet used, and should be
+
+<https://github.com/sonyxperiadev/kernel> and
+<https://github.com/sonyxperiadev/device-sony-sirius>
+
+Sony runs an Open Devices programme and publishes kernel sources and AOSP
+device configurations for its unlocked Xperias, sirius among them. This
+project has used the stock firmware *on the device* — decompiled device
+trees, tuning files, blobs — but not Sony's published source, and that is a
+gap rather than a decision.
+
+It is the most authoritative source available for several things still
+unwritten here:
+
+- **The camera sensors.** `drivers/media/platform/msm/camera_v2/sensor/` in
+  that kernel is where the IMX200 and IMX132 power-up and register sequences
+  live. No IMX200 driver exists anywhere in mainline, so this is the only
+  real starting point, and writing one without it means reverse-engineering
+  what Sony already published.
+- **The autofocus actuator**, a Rohm BU64296G, in the same tree's actuator
+  directory.
+- **The touchscreen.** The MAX1187x driver this port runs came from Sony
+  downstream; the published source is its origin.
+- **The WCD9320 codec and the msm8974 CAMSS**, for comparison against the
+  forward-ports here.
+
+Worth checking before writing any new driver for this phone.
+
 ## Where this project is ahead
 
 Worth knowing in the other direction, because it is what is worth contributing

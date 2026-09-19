@@ -110,13 +110,24 @@ renderer.
 
 ## Layout
 
-    drivers/panel/      DRM panel driver, all six Z2 panel variants
-    drivers/audio/      ASoC machine driver for the msm8974 sound card
-    drivers/audio/fmrepair/  ALSA plugin: repairs the FM capture's periodic sign-bit bursts (device sirius_fm)
-    drivers/battery/    VADC scaling and OCV capacity estimation patches
-    drivers/cpufreq/    Krait clocks, OPP tables and the shared CPU supply
+    drivers/panel/      display: DRM panel driver, all six Z2 panel variants
+    drivers/audio/      speakers and earpiece: ASoC machine driver for the
+                        msm8974 sound card
+    drivers/audio/wcd9320/   headphones and microphones: the WCD9320 codec on
+                        SLIMbus, forward-ported to 6.16
+    drivers/audio/q6voice/   call audio: the DSP's voice services, which
+                        mainline has no driver for
+    drivers/audio/fmrepair/  FM radio: ALSA plugin repairing the capture's
+                        periodic sign-bit bursts (device sirius_fm)
+    drivers/clk/pmic-clkdiv/ the PM8941 divider that makes the codec's
+                        9.6 MHz master clock; headphones need it
+    drivers/battery/    battery: VADC scaling and OCV capacity estimation
+    drivers/cpufreq/    CPU scaling: Krait clocks, OPP tables and the shared
+                        supply, 300 MHz to 2265.6 MHz
     drivers/fm/         V4L2 driver for WCNSS FM tuners (other msm8974 phones,
                         not the Z2)
+    drivers/touch/      empty. The MAX1187x touchscreen driver the phone runs
+                        is not published yet; see docs/where-work-goes.md
     panel-variants/     the six panel configurations extracted from stock,
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs
