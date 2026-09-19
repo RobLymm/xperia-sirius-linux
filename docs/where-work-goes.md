@@ -96,9 +96,15 @@ modules nobody else can obtain by installing packages.
   controller after a suspend. Both belong upstream. Neither is sufficient on
   its own to make touch survive a suspend; see `known-problems.md`.
 - **The board device tree carries no headphone or FM nodes.** No SLIMbus,
-  codec, secondary MI2S, internal FM, voice link or MCLK controller. Those are
-  in the two variant trees, and a tree built from the board file alone gives
-  speakers only.
+  codec, secondary MI2S, internal FM, voice link or MCLK controller. Those
+  are in the two variant trees, and a tree built from the board file alone
+  gives speakers only.
+
+  Until 2026-09-19 this was worse than it sounded: the codec tree
+  `#include`s `...-sirius-fmaudio.dts`, and that file had never been
+  published, so the chain could not be built from the repository at all. It
+  is now present. The chain is codec -> fmaudio -> board, and the codec tree
+  is the one to build.
 - **The kernel package builds 14 patches**: the panel, the two battery
   patches, the q6afe fix, the sound card machine driver, the board device tree
   and the CPU and L2 scaling set. It does not build the touch driver, the

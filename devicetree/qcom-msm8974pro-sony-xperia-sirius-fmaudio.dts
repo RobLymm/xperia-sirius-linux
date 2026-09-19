@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Sony Xperia Z2 (sirius): FM radio audio, experimental.
+ *
+ * The FM tuner is in the Broadcom BCM4335C0 Bluetooth chip. Its I2S leaves on
+ * the chip's PCM pads, which Sony's tree wires to the SoC's secondary MI2S
+ * pads: gpio79 bit clock, gpio80 word select, gpio81 data into the SoC
+ * (Sony's `qcom,sec-auxpcm-gpio-clk/sync/din`). Measured 2026-09-13 with the
+ * chip's Write_PCM_Pins command (0xFC61) and the pads released: as I2S master
+ * the chip drives bit clock at 1.53 MHz, word select at 47.8 kHz and data; as
+ * slave it sends no data even with LPASS clocking it. So sirius-fmd switches
+ * the chip to I2S master when audio is turned on, and the machine driver
+ * makes LPASS the clock consumer on this codec-less back end.
+ *
+ * Capture needs:
+ *
+ *   - SECONDARY_MI2S_TX as a back end without a codec. The msm8974 machine
+ *     driver makes a link that names a platform but no codec a back end
+ *     (drivers-wip/msm8974-sndcard-fm-backend.diff).
+ *   - a front end of its own. A q6asm session serves one direction at a time
+ *     and q6routing keeps one route per front end, and MultiMedia1 is held
+ *     open for speaker playback, so FM capture uses MultiMedia2.
+ *
+ * The internal FM port link (INT_FM_TX, patch 0014) was the first attempt,
+ * following Sony's mixer paths. It captures only zeros; it stays until the
+ * secondary MI2S route is proven, then goes.
+ *
+ * Fold this into the board file once FM audio has been heard, then delete
+ * this file.
+ */
+
+#include "qcom-msm8974pro-sony-xperia-shinano-sirius.dts"
+
+&q6afedai {
+	dai@19 {
+		reg = <SECONDARY_MI2S_TX>;
+		qcom,sd-lines = <0>;
+	};
+};
+
+&q6asmdai {
+	dai@1 {
+		reg = <MSM_FRONTEND_DAI_MULTIMEDIA2>;
+		direction = <Q6ASM_DAI_TX>;
+	};
+};
+
+&sound {
+	pinctrl-0 = <&quat_mi2s_default>, <&sec_mi2s_default>;
+
+	/*
+	 * INT_FM_TX is index 137 in qcom,q6dsp-lpass-ports.h once patch 0014
+	 * is applied; written numerically so this tree builds without it.
+	 */
+	int-fm-dai-link {
+		link-name = "Internal FM Capture";
+
+		cpu {
+			sound-dai = <&q6afedai 137>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+	};
+
+	mm2-dai-link {
+		link-name = "MultiMedia2";
+
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
+		};
+	};
+
+	sec-mi2s-dai-link {
+		link-name = "Secondary MI2S Capture";
+
+		cpu {
+			sound-dai = <&q6afedai SECONDARY_MI2S_TX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+	};
+};
+
+&tlmm {
+	sec_mi2s_default: sec-mi2s-default-state {
+		pins = "gpio79", "gpio80", "gpio81";
+		function = "sec_mi2s";
+		drive-strength = <8>;
+		bias-disable;
+	};
+};
