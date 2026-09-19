@@ -83,14 +83,16 @@ running kernel already has, because the GPU carveout put them there. So it
 builds out of tree against the kernel the phone is running, like the CCI
 module.
 
-Loaded on 2026-09-19, from `/lib/modules/6.16.12/updates/media/`:
+Eleven modules are installed in `/lib/modules/6.16.12/updates/media/`: `mc`,
+`videodev`, `v4l2-async`, `v4l2-fwnode`, `v4l2-dv-timings` and six
+`videobuf2-*`. Six of them load on 2026-09-19 — the rest have no consumer yet
+and `modprobe` will pull them in when one appears. The kernel reports
 
     mc: Linux media interface: v0.10
     videodev: Linux video capture interface: v2.00
 
-eleven modules in all: `mc`, `videodev`, `v4l2-async`, `v4l2-fwnode`,
-`v4l2-dv-timings`, and six `videobuf2-*`. There is still no `/dev/video*`
-because nothing registers one yet.
+and no unresolved symbol versions. There is still no `/dev/video*`, because
+nothing registers one yet.
 
 ### Building them again
 

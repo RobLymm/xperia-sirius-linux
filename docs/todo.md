@@ -80,7 +80,7 @@ Staged in `camera-plan.md`. Two stages are done, and the gate has moved.
       every part of the media stack is tristate, and `DMA_SHARED_BUFFER`,
       `CMA` and `DMA_CMA` are already built in for the GPU carveout, so it
       builds out of tree against the running kernel. Eleven modules are
-      installed and loaded.
+      installed, six of them loaded; the rest load when something needs them.
 - [x] **Stage 2** — the CCI bus and sensor identification. Both sensors
       answer and identify themselves from the silicon: rear **IMX200**, front
       **IMX132**. The phone runs `images/boot-cam-v2.img`, which carries the

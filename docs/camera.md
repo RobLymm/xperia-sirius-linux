@@ -334,37 +334,29 @@ carries imx111, 208, 214, 219, 258, 274, 283, 290, 296, 319, 334, 335, 355,
 work needed a hand-written IMX179 driver for exactly this reason, and it is
 marked HACK.
 
-So the order is:
+The staged order of work is in `camera-plan.md` and is not repeated here. The
+control bus, both sensor identities and the media core are settled; camss and
+the two sensor drivers are not.
 
-1. Enable CCI (`&cci { status = "okay"; }`) and add the two sensor nodes on
-   `cci_i2c0` (rear, 0x20) and `cci_i2c1` (front, 0x6c). Node and driver are
-   already in this fork; no forward-port needed. Needs `CONFIG_I2C_QCOM_CCI`.
-2. Power the rails and read the sensor ID registers over CCI with
-   `i2ctransfer` to confirm the two parts — IMX200 rear and IMX132 front on
-   current evidence — and save the two EEPROMs (0xa0).
-3. Bring up camss against `qcom,msm8916-camss` with Jonathan Marek's patch
-   (contiguous DMA, no IOMMU; 8x96 ISPIF handler) forward-ported from 5.17 to
-   6.16, where the resource tables are now `camss_subdev_resources` collected
-   in a per-SoC `camss_resources`. Needs `CONFIG_VIDEO_QCOM_CAMSS` and the
-   media stack, which this kernel is built without (the single blocker:
-   camera-plan.md stage 1).
-4. Write or adapt a driver for each sensor.
+**Userspace is the one part that needs no new work.** libcamera's `simple`
+pipeline handler with the software ISP is essentially the qcom-camss path —
+SoftISP was first enabled for qcom-camss — and handles 8/10-bpp unpacked RAW
+Bayer, enough for preview and stills. The libcamera 0.7.2 installed on the
+phone lists `qcom-camss` among the drivers that handler accepts, and Snapshot
+is installed. No msm8974 tuning exists, so the Z2 would be first.
 
-5. Userspace: libcamera's `simple` pipeline handler with the software ISP is
-   essentially the qcom-camss path (SoftISP was first enabled for qcom-camss),
-   and handles 8/10-bpp unpacked RAW Bayer — enough for preview and stills. No
-   msm8974 tuning exists, so the Z2 would be first.
+Biggest risks, in the order they will be met:
 
-Steps 1 to 3 are porting and wiring; step 1 is now just device tree. Step 4 is
-the real work, and it is per sensor. None of it is speculative any more, which
-is the difference between this and where the assessment started.
-
-Biggest risks: the no-IOMMU contiguous DMA needs a CMA reservation big enough
-for 20 MP RAW10 buffers (the same VRAM/CMA pressure the GPU already has); the
-dual-VFE ISPIF routing is the least-tested camss code; and the rear sensor's
-power and register sequence is the main reverse-engineering unknown (and which
-part it even is — see the IMX200/IMX220 question above). The front IMX132 is a
-later, separate effort.
+- **Contiguous DMA without an IOMMU** needs a CMA reservation big enough for
+  20 MP RAW10 buffers, on a phone whose command line already gives
+  `cma=768M` and `msm.vram=512m` to the GPU. Sized, not yet tested.
+- **Dual-VFE ISPIF routing** is the least-exercised code in camss: 8x16 ships
+  one VFE, and msm8974 has two.
+- **The rear sensor's register sequence** is the real unknown, and it is now a
+  narrower one than it was. Which part it is, is settled. The power sequence
+  is published by Sony and recorded above. What is missing is only the mode
+  and register programming, which was never in any kernel and has to come off
+  the stock system partition. The front IMX132 is the same problem, smaller.
 
 ## Bringing the bus up by hand, and four traps
 

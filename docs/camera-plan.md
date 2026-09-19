@@ -75,9 +75,10 @@ or a compile-time option *inside* the media modules themselves
 removed. Set `CONFIG_MEDIA_SUPPORT_FILTER=y` or the DVB, analogue TV, radio and
 SDR trees come with it.
 
-Built and loaded on the phone: `mc`, `videodev`, `v4l2-async`, `v4l2-fwnode`,
-`v4l2-dv-timings`, and the six `videobuf2-*` modules, in
-`/lib/modules/6.16.12/updates/media/`. The kernel reports
+Eleven modules are installed in `/lib/modules/6.16.12/updates/media/`: `mc`,
+`videodev`, `v4l2-async`, `v4l2-fwnode`, `v4l2-dv-timings` and the six
+`videobuf2-*`. Six load today; the others have no consumer until camss exists.
+The kernel reports
 
     mc: Linux media interface: v0.10
     videodev: Linux video capture interface: v2.00
