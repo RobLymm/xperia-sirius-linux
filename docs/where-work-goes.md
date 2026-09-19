@@ -49,18 +49,46 @@ To find out what is actually running:
 | Kernel patches 0002 and 0004 | Present in the package directory but not in its `source=` list, so they do nothing. 0004 adds a ramoops region the phone does not use |
 | `latest.dts`, `latest.dtb`, `tools/update-latest.sh` | Deleted on 2026-09-13. Do not reintroduce a "latest" pointer: it went stale without anyone noticing |
 
-## Known gaps, so nobody assumes otherwise
+## Known gaps between this repository and the running phone
 
-- The board file does not yet contain the headphone or FM audio nodes. They are
-  in the two variant files. A tree built from the board file alone gives
+Checked on the device on 2026-09-19. The phone works; a phone built only from
+what is packaged here would not, and these are the reasons.
+
+**Twenty-two of the modules the phone has loaded are hand-built**, from
+`/lib/modules/6.16.12/updates`, not from the kernel package: the whole QDSP6
+audio stack, the WCD9320 codec, the SLIMbus NGD controller, the PM8941 clock
+divider, the q6voice set, the panel driver, the battery pair and the
+touchscreen. Display, touch, battery and audio therefore currently depend on
+modules nobody else can obtain by installing packages.
+
+- **The touch driver is not in this repository at all.** `max1187x.c` and its
+  two headers exist only in `/home/rob/max1187x-fix` on the test phone.
+  `drivers/touch/` here is an empty directory. Nothing in the kernel package
+  builds it, so a packaged Z2 has no touchscreen.
+- **The board device tree carries no headphone or FM nodes.** No SLIMbus,
+  codec, secondary MI2S, internal FM, voice link or MCLK controller. Those are
+  in the two variant trees, and a tree built from the board file alone gives
   speakers only.
-- The kernel package does not yet build the WCD9320 codec, the PM8941 clock
-  divider, q6voice or the internal FM capture port, and its CPU operating point
-  table disables 22 of its 31 entries, capping the clock at 960 MHz. The
-  drivers exist in this repository; they are not in the package.
-- The packaged install route has never been booted. Everything verified so far
-  was flashed by hand. `docs/from-stock-to-this.md` therefore still starts by
-  installing postmarketOS as an Xperia Z3.
+- **The kernel package builds 14 patches**: the panel, the two battery
+  patches, the q6afe fix, the sound card machine driver, the board device tree
+  and the CPU and L2 scaling set. It does not build the touch driver, the
+  WCD9320 codec, the PM8941 clock divider, q6voice or the internal FM capture
+  port, all of which the phone is running.
+- **Its CPU table caps the clock at 960 MHz**: 22 of its 31 operating points
+  are marked disabled, although the phone itself runs the full rated range
+  from a hand-built tree.
+- **The phone still identifies as a Z3.** `device-sony-sirius` is not
+  installed, only its `-alsa` and `-phosh` subpackages; `deviceinfo` names
+  `sony-leo` and the Z3 device tree, and `/boot` holds only the stale
+  leo `.dtb`.
+- **The packaged install route has never been booted.** Everything verified so
+  far was flashed by hand, which is why `docs/from-stock-to-this.md` still
+  starts by installing postmarketOS as an Xperia Z3 and layering the Z2 on top.
+
+Camera work has started: a `cci` module is built on the phone but not loaded.
+
+See `known-problems.md` for the evening this cost, and the rule at the top of
+this page for how to avoid repeating it.
 
 ## Naming
 
