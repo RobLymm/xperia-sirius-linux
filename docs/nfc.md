@@ -51,7 +51,27 @@ directly.
 `pm8941_mpps` is already a label in mainline's `pm8941.dtsi`, with eight MPPs,
 so MPP 2 needs nothing added.
 
-## The one thing to verify
+## In the board device tree since 2026-09-19
+
+The node is now in
+`devicetree/qcom-msm8974pro-sony-xperia-shinano-sirius.dts`, with two changes
+from the proposal above, both from reading Sony's driver rather than their
+device tree (`sony-source-audit.md`):
+
+- `enable-gpios` is **`GPIO_ACTIVE_HIGH`**. See below — the question the next
+  section calls "the one thing to verify" is answered.
+- A `regulator-fixed`, `vreg_nfc_pvdd`, drives PVDD from PM8941 GPIO 34 and is
+  held always-on, because the mainline binding has no supply property and the
+  Shinano common tree leaves that pin disabled and marked NC.
+
+It compiles and every phandle in it resolves against the built blob —
+`enable-gpios` to `mpps@a000` MPP 2, PVDD to `gpio@c000` GPIO 34, the interrupt
+and `firmware-gpios` to `pinctrl@fd510000`. **It has never been flashed**, so
+nothing here is tested on hardware, and the kernel has
+`CONFIG_NFC_NXP_NCI_I2C=m` so the driver will at least bind if the chip
+answers.
+
+## The one thing to verify — answered
 
 **VEN polarity.** Sony's `nxp,ven = <0x57 0x02 0x01>` has a third cell of 1,
 which in their downstream format means active low. That is not the usual
@@ -59,9 +79,14 @@ arrangement for a PN547, where VEN high enables the chip and low holds it in
 reset, and the mainline driver requests the line with `GPIOD_OUT_LOW` and then
 drives it to its active state to enable.
 
-If the node above produces no chip, invert it to `GPIO_ACTIVE_HIGH` before
-looking anywhere else. Both polarities are one line apart and cost nothing to
-try.
+Sony's own driver settles it. It reads the flag into `ven_gpio_flags` and then
+never uses it: every access goes through the legacy `gpio_set_value()` and
+`gpio_set_value_cansleep()`, which are raw and apply no polarity, and it drives
+the line **high** to enable and low to hold in reset. So the flag is dead code
+downstream, and the node in the board tree uses `GPIO_ACTIVE_HIGH`.
+
+If no chip answers, inverting it is still the first thing to try — but start
+from active high, not active low.
 
 `nxp,pvdd_en` on PM8941 GPIO 34 has no equivalent in the mainline binding. If
 the chip does not answer on either polarity, that rail is the next thing to

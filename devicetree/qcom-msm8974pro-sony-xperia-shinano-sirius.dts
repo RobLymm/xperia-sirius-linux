@@ -27,6 +27,28 @@
 	compatible = "sony,xperia-sirius", "qcom,msm8974pro", "qcom,msm8974";
 	chassis-type = "handset";
 
+	/*
+	 * NFC supply. The PN547's PVDD comes from PM8941 GPIO 34, which the
+	 * Shinano common tree leaves disabled and marked NC because most of
+	 * the family has no NFC. Sony's downstream driver takes the pin
+	 * through an "nxp,pvdd_en" property; the mainline nxp-nci binding has
+	 * no supply property at all, so it has to be a regulator that is
+	 * simply held on. See docs/nfc.md and docs/sony-source-audit.md.
+	 */
+	vreg_nfc_pvdd: regulator-nfc-pvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "nfc_pvdd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+
+		gpio = <&pm8941_gpios 34 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+
+		pinctrl-0 = <&nfc_pvdd_en_pin>;
+		pinctrl-names = "default";
+	};
+
 	sirius_battery: battery {
 		compatible = "simple-battery";
 
@@ -331,6 +353,15 @@
 		power-source = <PM8941_GPIO_S3>;
 	};
 
+	nfc_pvdd_en_pin: nfc-pvdd-en-state {
+		pins = "gpio34";
+		function = "normal";
+		bias-disable;
+		input-disable;
+		output-low;
+		power-source = <PM8941_GPIO_S3>;
+	};
+
 	lcd_reset_pin: lcd-reset-state {
 		pins = "gpio19";
 		function = "normal";
@@ -373,6 +404,36 @@
  * Rear IMX200 on master 0 at 0x10, front IMX132 on master 1 at 0x36. The
  * sensor nodes themselves wait on their drivers.
  */
+/*
+ * NFC: an NXP PN547 on blsp1_i2c6, which the common tree leaves disabled.
+ *
+ * Two details came from Sony's published source rather than from their device
+ * tree, and both matter (docs/sony-source-audit.md):
+ *
+ *   - Sony's tree marks the enable line active low, but their driver never
+ *     applies that flag: every access goes through the raw gpio_set_value(),
+ *     and it drives the line HIGH to bring the chip out of reset. So this is
+ *     GPIO_ACTIVE_HIGH. If no chip answers, inverting it is the first thing
+ *     to try, as docs/nfc.md says.
+ *   - PVDD has no home in the mainline binding and is the regulator above.
+ *
+ * Untested: this node has never been on a booted phone.
+ */
+&blsp1_i2c6 {
+	status = "okay";
+
+	nfc@28 {
+		compatible = "nxp,pn547", "nxp,nxp-nci-i2c";
+		reg = <0x28>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <24 IRQ_TYPE_EDGE_RISING>;
+
+		enable-gpios = <&pm8941_mpps 2 GPIO_ACTIVE_HIGH>;
+		firmware-gpios = <&tlmm 57 GPIO_ACTIVE_HIGH>;
+	};
+};
+
 &cci {
 	clocks = <&mmcc CAMSS_TOP_AHB_CLK>,
 		 <&mmcc CAMSS_CCI_CCI_AHB_CLK>,
