@@ -55,12 +55,19 @@ test pattern generator. Every address, interrupt and clock it needed was
 already known from three independent sources, and mainline's `mmcc-msm8974`
 already had every clock.
 
-**What is left is the two sensor drivers, and they are weeks.** The reason is
-narrower than "no driver exists": the power sequences are published by Sony
-exactly, but the register and mode tables are not in any kernel, Sony's
-included — in this generation they lived in the userspace camera HAL — so
-they have to be recovered from the stock system partition. That recovery, not
-the driver writing, is the unknown. See `camera-plan.md`.
+**What is left is the two sensor drivers.** The obstacle was expected to be
+the register tables, which are in no kernel, Sony's included, and turn out not
+to be in the stock camera HAL either — it computes the writes at run time, so
+there is nothing to extract. What replaces them is better than it sounds: both
+sensors' power-on defaults were read over CCI and describe a complete
+full-resolution mode, 5248 x 3936 for the rear and 1976 x 1144 for the front,
+matching Sony's device tree exactly. A driver starts from those rather than
+from nothing.
+
+Still weeks rather than days — exposure, gain, link frequency, the smaller
+preview modes and the autofocus all have to be worked out on hardware — but
+the part that looked like blind reverse-engineering is now mostly a matter of
+reading registers. See `camera-plan.md` and `camera.md`.
 
 **NFC.** Not working, and not merely untested: there is no NFC node in the
 booted device tree and no driver loaded. The mainline driver supports the

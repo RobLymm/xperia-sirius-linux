@@ -94,11 +94,13 @@ from the kernel to the sensor data.
       unreachable VFE clock rate, and a `switch` on SoC version in
       `vfe_src_pad_code` that a grep for `==` does not find.
 - [ ] **Stage 4/5** — sensor drivers for the IMX132 front and the IMX200
-      rear. **This is now the blocker**, and the hard part is not writing the
-      drivers but getting the data: Sony's published kernel gives the power
-      sequences exactly and **no register or mode tables at all**, because in
-      this generation they lived in the userspace HAL. They have to be
-      recovered from the stock system partition first.
+      rear. **This is now the blocker**, but it is a smaller one than it
+      looked. There is no register table to copy anywhere — not in Sony's
+      kernel and not in the stock HAL, which computes the writes at run time
+      (`prior-art.md`). What there is instead: both sensors' power-on
+      defaults, read over CCI, which describe a complete full-resolution mode
+      whose geometry matches Sony's device tree exactly. `camera.md` has them.
+      A driver can start from the defaults rather than from nothing.
 
       Two smaller things to do alongside, both needing a flash: add
       `vdda-supply = <&pm8941_l12>` to the camss node, which a real sensor

@@ -14,6 +14,17 @@ Do this before wiping the stock ROM if you can. If the stock system partition
 is already gone, the firmware is gone with it, and the phone's own NV storage
 partitions are the only thing left that is irreplaceable.
 
+**On the test phone it is not gone.** postmarketOS installs to `userdata`, so
+the stock `system` partition survived untouched — Android 6.0.1, D6503,
+23.5.A.1.291, 2.67 GB of ext4. Check before assuming you have lost it:
+
+    sudo blkid /dev/disk/by-partlabel/system
+    sudo mkdir -p /mnt/stock
+    sudo mount -o ro,noload /dev/disk/by-partlabel/system /mnt/stock
+
+Mount it read-only. `noload` skips journal recovery, which would otherwise
+write to a partition you want to leave alone.
+
 ## Sony's device tree, from the FOTA kernel
 
 The FOTAKernel partition holds an ELF with several device trees embedded in

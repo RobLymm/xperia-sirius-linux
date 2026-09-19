@@ -146,6 +146,7 @@ renderer.
     tools/              build the board device tree and a boot image, check that
                         two device trees describe the same hardware, drive the
                         Broadcom FM tuner
+    tools/sensor-dump.sh read a camera sensor's registers over CCI
     tools/kbuild-mod.sh build a kernel directory as an out-of-tree module
                         against the running kernel, with harvest-symvers.py
                         and fill-symvers.py to give it the symbol versions

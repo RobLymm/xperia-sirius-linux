@@ -108,12 +108,15 @@ What it *is* authoritative for, taken verbatim:
 Both module part numbers match the EEPROM strings already read off the device,
 so Sony's tree describes this exact handset.
 
-**MCLK is 8 MHz.** Both sensors' power-on step is `CAM_CLK = <6 0 0 N>`, and
-value 0 means `SENSOR_MCLK_DEFAULT` in `sony_camera_v4l2.c`, which is
-8,000,000. That is not the 19.2 MHz the CCI node currently supplies, nor the
-24 MHz of Qualcomm reference designs; the PLL tables above multiply up from
-it. Untested here — the sensors answer I2C at the current rate, but nothing
-has streamed.
+**Sony's driver sets MCLK to 8 MHz; the phone runs 19.2 MHz and both sensors
+work.** Both power-on steps are `CAM_CLK = <6 0 0 N>`, and value 0 means
+`SENSOR_MCLK_DEFAULT` in `sony_camera_v4l2.c`, which is 8,000,000. The CCI
+node here supplies 19.2 MHz (`camss_mclk0_clk` and `camss_mclk2_clk`, both
+confirmed in `/sys/kernel/debug/clk`), and at that rate both sensors answer
+and report sane PLL dividers. These are not necessarily in conflict — an IMX
+sensor accepts a range of INCK and the PLL compensates — but which rate to
+drive is an open question, and it changes every derived clock. Nothing has
+streamed from a sensor yet.
 
 **Power-on, rear**, in order, each with its delay in ms:
 
@@ -135,6 +138,54 @@ VANA, VIO, VDIG — with a 98 ms delay after VDIG.
 That 0x0100 is the standard Sony/SMIA streaming-control register, which is
 worth knowing given the rear sensor reads zero across the SMIA identity block:
 the identity registers are non-standard, the streaming register is not.
+
+## What the sensors say about themselves
+
+Read over CCI on 2026-09-19 with the rails up, reset released and MCLK at
+19.2 MHz. This matters because **there is no register table to copy** — see
+`prior-art.md` — so the sensors' own power-on defaults are the starting point
+for both drivers, and they turn out to be a complete, coherent
+full-resolution mode.
+
+Both parts use the standard Sony/SMIA register map, and the geometry they
+report matches Sony's device tree exactly.
+
+| register | IMX200 (rear) | IMX132 (front) | meaning |
+|---|---|---|---|
+| 0x0112 | 0x0a0a | 0x0a0a | CSI data format: RAW10 in, RAW10 out |
+| 0x0340 | 3984 | 1200 | frame length, lines |
+| 0x0342 | 5904 | 2250 | line length, pixel clocks |
+| 0x0344 / 0x0346 | 0, 0 | 0, 28 | crop start x, y |
+| 0x0348 / 0x034a | 5247, 3935 | 1975, 1171 | crop end x, y |
+| 0x034c / 0x034e | **5248, 3936** | **1976, 1144** | output size |
+| 0x0380 | 1 | 1 | x increment: no binning or skipping |
+| 0x0202 | 1000 | 800 | coarse integration time, lines |
+| 0x0300 / 0x0302 | 10, 1 | 10, 1 | VT pixel and system clock dividers |
+| 0x0306-7 | 110 | 45 | PLL multiplier |
+
+`0x034c/0x034e` is the tell: 5248 x 3936 is exactly the rear
+`pixel_number_w/h` in Sony's tree, and 1976 is exactly the front's. The crop
+windows are self-consistent too — 5247 - 0 + 1 = 5248, and 1171 - 28 + 1 =
+1144.
+
+Taking the PLL at face value with a 19.2 MHz input gives plausible operating
+points, which is the second sign the defaults are usable rather than
+arbitrary:
+
+    IMX200:  19.2 x 110 / 10 = 211.2 MHz pixel clock
+             211.2e6 / (5904 x 3984)  =  ~9 fps at 20.7 MP
+    IMX132:  19.2 x 45 / 10  =  86.4 MHz pixel clock
+             86.4e6 / (2250 x 1200)   =  ~32 fps at 2.4 MP
+
+Neither has been streamed, so treat the frame rates as arithmetic rather than
+measurement. `tools/sensor-dump.sh` reads a range of registers over CCI; the
+controller rejects block reads, so it goes two bytes at a time.
+
+Two traps for whoever writes the drivers. The rear sensor keeps its model ID
+at **0x0016**, not the conventional 0x0000, and reads zero across the whole
+SMIA identity block — code that checks the usual place concludes the sensor is
+absent. And the front keeps its ID at 0x0000 and reads zero at 0x0016, so each
+looks dead at the other's register.
 
 ## What already exists
 

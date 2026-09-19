@@ -122,6 +122,43 @@ Worth checking before writing any new driver for this phone — and worth
 checking *which branch*, because the sirius-specific files are not all on the
 newest one.
 
+## The stock camera stack, and why there is no table to lift
+
+Read on 2026-09-19, because the register sequences had to be somewhere and it
+was not the kernel. The stock Android 6.0.1 system partition is still intact
+on the test phone — see `extracting-from-stock.md` for how to mount it.
+
+**`/system/lib/libcammw.so` is Sony's sensor driver.** 253 KB, ARM 32-bit,
+stripped, and it exports exactly what the name suggests:
+
+    imx132_get_sensor_param        imx200_get_sensor_param
+    imx134_get_sensor_param        imx135_get_sensor_param
+    sony_camera_get_sensor_driver  sony_camera_get_focus_driver
+    sony_camera_get_eeprom_driver  sony_camera_platform_i2c_write
+    cam_load_tables                sony_camera_platform_i2c_read
+
+Nothing else in the stock system knows these sensors by name: `camera.qcom.so`,
+`mm-qcamera-daemon` and `libmmcamera_interface.so` do not mention them, and
+`libmmcamera2_sensor_modules.so` refers only to `sony_camera_0`, the kernel
+subdev name.
+
+**And it contains no register tables.** Its `.rodata` is 25 KB and 90%
+printable strings; scanning for arrays of Sony IMX register addresses finds no
+run longer than two entries in any plausible encoding. `imx200_get_sensor_param`
+disassembles to arithmetic on a context structure, not a table lookup. The
+`.dat` files in `/vendor/camera/` are tuning and module parameters — under 2%
+of their 16-bit words look like sensor registers, and they are mostly zeros.
+
+So Sony's HAL **computes** the register writes at run time from the module
+parameters and the sensor's own state. There is no table to extract, and the
+search should not be repeated.
+
+What that leaves, and why it is not as bad as it sounds: these are ordinary
+Sony IMX parts with the standard register map, and their power-on defaults can
+simply be read over CCI. The first read confirms it — the IMX132 reports
+`0x0340 = 0x04b0`, frame length 1200 lines, which is exactly the active height
+Sony's device tree gives it. `camera.md` records what a full dump found.
+
 ## Where this project is ahead
 
 Worth knowing in the other direction, because it is what is worth contributing
