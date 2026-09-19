@@ -33,6 +33,42 @@ carveout:
 With 128 MB the screen freezes once the carveout fills. 512 MB has been stable
 for compositor use.
 
+## Do not build a boot image from the files in /boot
+
+Two files there look authoritative and are not:
+
+- **`/boot/boot.img` is not what the phone boots.** Its stored command line
+  lacks `cma=768M msm.vram=512m msm.allow_vram_carveout=1`, which the running
+  kernel has. Flash it and the GPU gets no memory and the boot stalls before
+  USB networking starts: blank screen, no way in.
+- **`/boot/qcom-msm8974pro-sony-xperia-shinano-leo.dtb` is not the device
+  tree the phone boots.** It is missing the board's own nodes, the
+  touchscreen among them. Build an image on it and the phone starts with no
+  touchscreen, which on a phone means no way to use it.
+
+Both were discovered the hard way, by shipping three boot images built on
+that DTB and leaving the device unusable for an evening. The nodes that
+*are* present make it worse: the display and GPU nodes are there, so the
+phone looks nearly right while being unusable.
+
+**Before flashing anything, check the image carries what it should:**
+
+    strings -a boot.img | grep -c msm.vram=512m     # expect 1
+    strings -a boot.img | grep -c max1187x          # expect 1, the touchscreen
+
+**Take backups from the boot partition, not from /boot, and take them before
+flashing, not after:**
+
+    sudo dd if=/dev/disk/by-partlabel/boot of=backup.img bs=1M
+
+A backup made after flashing a bad image is a copy of the bad image. That
+also happened.
+
+The correct source for a modified device tree is the DTB inside a boot image
+known to start, or the board sources in `../devicetree/`. Not `/boot`, and
+not `dtc -I fs -O dts /proc/device-tree` — the live tree round-trips into
+something that does not boot.
+
 ## Suspend and resume
 
 Suspend itself works. It was recorded here as broken, but `suspend.target`
