@@ -154,13 +154,23 @@ EEPROM calibration data (lens shading, AF) from stage 2.
 
 **Done when** rear frames capture, focus can be driven, and the flash fires.
 
-## Stage 6 — userspace
+## Stage 6 — userspace — done for the front camera, 2026-09-19
 
 libcamera's `simple` pipeline handler supports Qualcomm camss with its
 software ISP. Add tuning files from the EEPROM data, then test with `cam`,
 then Snapshot or Megapixels on Phosh.
 
-**Done when** a photo is taken from the phone's camera app.
+**Done:** Snapshot shows a live preview and writes a 1920x1080 JPEG to
+`~/Pictures/Camera/`. Two things were needed beyond the driver, both in
+`../drivers/camera/README.md`: pipewire runs libcamera itself and needs the
+CPU debayer selected in *its* environment, and `/etc/environment.d` cannot do
+that for an already-running user manager.
+
+What is left here is quality rather than function. There is no libcamera
+tuning file for the IMX132 and no entry in its sensor properties database, so
+there is no white balance or colour matrix; and the debayer runs on the CPU,
+because the GPU one fails on this Adreno. Poor colour and a low frame rate
+follow from those two.
 
 ## Order and dependencies
 
@@ -168,8 +178,7 @@ then Snapshot or Megapixels on Phosh.
                   └─► 3 CAMSS ──────────────────────────┴─► 6 userspace
                                      5 rear sensor ─────┘
 
-Stages 1 to 4 are done, and stage 6 is most of the way there: libcamera sees
-the front camera and captures from it. What is left is **stage 5**, the rear
-IMX200 and its autofocus, and the tuning half of stage 6 — auto-exposure,
-white balance and a libcamera tuning file — plus trying Phosh's camera app,
-which has not been run yet.
+Every stage but 5 is done, for the front camera: Phosh's camera app takes a
+photo. What is left is **stage 5**, the rear IMX200 with its autofocus and
+flash, and the quality half of stage 6 — a libcamera tuning file, and getting
+the debayer off the CPU.

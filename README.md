@@ -8,9 +8,9 @@ Calls, SMS, mobile data, Wi-Fi, Bluetooth, GNSS, FM radio, the display,
 touch, the sensors and the full 300 MHz to 2265.6 MHz range of all four CPU
 cores work. Audio works for the loudspeakers, earpiece, headphones and
 recording, and a call carries the caller's voice and anything the phone
-plays, but not yet what its microphone hears. The front camera takes pictures;
-the rear one has no driver yet. Suspend is off because resume loses Wi-Fi and
-touch.
+plays, but not yet what its microphone hears. The front camera takes pictures
+from Phosh's camera app, with poor colour and a low frame rate; the rear one
+has no driver yet. Suspend is off because resume loses Wi-Fi and touch.
 
 **If you have a Z2 and want it running like this one, start with
 [docs/from-stock-to-this.md](docs/from-stock-to-this.md).** It is the whole
@@ -58,7 +58,7 @@ the others listed there.
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
-| Camera | **The front camera works** | The IMX132 captures 1976x1144 Bayer through the msm8974 CAMSS driver, and libcamera's software ISP turns it into colour: `cam -l` lists it and `cam --capture` produces correct images. What is left is auto-exposure and white balance, Phosh's camera app, which has not been tried yet, and the whole of the rear IMX200. `docs/camera.md`, `drivers/camera/` |
+| Camera | **The front camera works** | Phosh's camera app takes a photo. The IMX132 captures 1976x1144 Bayer through the msm8974 CAMSS driver and libcamera's software ISP turns it into colour. Colour is poor and the frame rate low — there is no tuning file for this sensor and the debayer runs on the CPU, the GPU path being broken here. The rear IMX200 has no driver. `docs/camera.md`, `drivers/camera/` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. ModemManager can enable it directly with `--location-enable-gps-nmea`. A fix needs sky. `modem/` |
 | Mobile data | Working | A bearer comes up through NetworkManager and `wwan0` gets an address; verified by pinging and fetching a page bound to that interface rather than trusting the default route. On GPRS it is slow, and the modem has not yet been persuaded to carry data on anything faster. `modem/`, `docs/modem.md` |
 | SMS | Working | Sending and receiving both tested |
@@ -140,8 +140,9 @@ renderer.
     devicetree/         the board device tree the phone actually runs
     upstream/           a mainline-style device tree, for submission
     userspace/          the ALSA UCM profile, the proximity udev rule, the
-                        resume hook, and fixes for 32-bit ARM that are not
-                        Z2 specific
+                        resume hook, the pipewire drop-in that keeps
+                        libcamera off the broken GPU debayer, and fixes for
+                        32-bit ARM that are not Z2 specific
     tools/call-say.sh   play audio into a voice call, through the DSP
                         rather than a microphone
     tools/              build the board device tree and a boot image, check that

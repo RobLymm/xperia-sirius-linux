@@ -42,10 +42,10 @@ to be the s2idle resume path, so it may fall out of the suspend work. Days.
 
 ## Blocking for some people, not for all
 
-**Camera.** The front camera works: the IMX132 captures 1976x1144 Bayer
-through the msm8974 CAMSS driver, and libcamera's software ISP turns it into
-colour. Five of the six stages are done — media core, control bus, ISP, front
-sensor, and most of userspace.
+**Camera.** Phosh's camera app takes a photo with the front camera. The
+IMX132 captures 1976x1144 Bayer through the msm8974 CAMSS driver, libcamera's
+software ISP turns it into colour, and Snapshot writes a JPEG. Five of the six
+stages are done — media core, control bus, ISP, front sensor and userspace.
 
 What is left is the **rear IMX200**, and it is harder than the front turned
 out to be. The front was unlocked by Intel's old atomisp driver, which
@@ -55,9 +55,13 @@ IMX200, and those registers cannot be read out of a sensor that is not already
 streaming. Add to that the autofocus actuator and the flash. Weeks, unless a
 table turns up.
 
-Then **tuning**: auto-exposure, white balance and a libcamera tuning file.
-Without them the images are flat and slightly green. That is a known, bounded
-job rather than an unknown one.
+Then **quality**, which is two separate bounded jobs. Colour is poor because
+libcamera has no tuning file for this sensor and no entry for it in its sensor
+properties database, so there is no white balance and no colour matrix; that
+is worth writing and sending upstream. The frame rate is low because the
+debayer runs on the CPU — libcamera's EGL debayer fails every frame on this
+Adreno, probably the same fault that makes the GPU renderer unusable
+elsewhere on this phone.
 
 **NFC.** Not working, and not merely untested: there is no NFC node in the
 booted device tree and no driver loaded. The mainline driver supports the

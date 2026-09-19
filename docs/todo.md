@@ -74,8 +74,8 @@ reboot, so autoconnect works.
 
 ## 3. Camera
 
-Staged in `camera-plan.md`. Four stages are done and the front camera takes
-pictures. What is left is the rear sensor, and tuning.
+Staged in `camera-plan.md`. **Phosh's camera app takes a photo with the front
+camera.** What is left is the rear sensor, and quality.
 
 - [x] **Stage 1** — the media core. It needed no kernel rebuild and no flash:
       every part of the media stack is tristate, and `DMA_SHARED_BUFFER`,
@@ -106,16 +106,22 @@ pictures. What is left is the rear sensor, and tuning.
       atomisp tables has been found for this part, and the vendor MIPI
       registers cannot be read out of a sensor that is not streaming. Start by
       looking for an IMX200 or IMX220 table anywhere at all.
-- [ ] **Stage 6** — the camera app. libcamera already works; what is missing
-      is auto-exposure, white balance and a tuning file. `cam` gets flat,
-      slightly green images because libcamera falls back to
-      `uncalibrated.yaml` and has no `imx132` entry in its sensor properties
-      database — both worth contributing upstream. **Phosh's camera app has
-      not been tried**: the phone was at the greeter when the sensor started
-      working. Unlock it and run Snapshot.
+- [x] **Stage 6** — the camera app. **Snapshot takes a photo**, 1920x1080
+      JPEG into `~/Pictures/Camera/`. Two things were needed beyond the
+      driver: pipewire runs libcamera itself and needs
+      `LIBCAMERA_SOFTISP_MODE=cpu` in *its* environment, which
+      `/etc/environment.d` cannot give an already-running user manager —
+      hence `../userspace/pipewire.service.d/`.
+- [ ] **Quality.** Colour is poor and the frame rate low. No libcamera tuning
+      file exists for the IMX132 and it has no entry in libcamera's sensor
+      properties database, so there is no white balance or colour matrix;
+      writing one and sending it upstream is the fix. The frame rate is low
+      because the debayer runs on the CPU — libcamera's EGL debayer fails
+      every frame on this Adreno, which is probably the same fault that makes
+      `/etc/sirius-renderer` need cairo.
 
 **Done when** a still is captured from each camera and a video is recorded
-from the rear one.
+from the rear one. Half of that is done: the front camera works end to end.
 
 ## 4. CPU frequency scaling
 

@@ -229,10 +229,37 @@ The CPU path works. `/etc/environment.d/90-libcamera-softisp.conf` sets
 know. This is the same Adreno 330 that needs `/etc/sirius-renderer` set to
 cairo rather than gl, so it may be the same underlying problem.
 
+## Phosh's camera app takes a photo
+
+Snapshot finds the camera, shows a live preview and writes a JPEG:
+
+    ~/Pictures/Camera/Photo from 2026-09-19 15-22-05.702509.jpeg
+    1920x1080, 3 components, 951 KB, complete to the EOI marker
+
+**Two things were needed beyond the driver.** pipewire runs libcamera itself
+for the camera portal, so it is pipewire's environment that has to select the
+CPU debayer, not the shell's. `/etc/environment.d` does not achieve that on
+its own: the user manager reads it at start, so a file written afterwards
+never reaches a pipewire that is already running. The drop-in in
+`../../userspace/pipewire.service.d/` is the durable answer.
+
+The other was a trap rather than a fix. Restarting several units at once —
+
+    systemctl --user restart pipewire pipewire-pulse wireplumber
+
+— fails the **whole** job if any one of them does not exist, and
+`pipewire-pulse` does not here. It prints `Failed to enqueue jobs` and nothing
+restarts, which looks exactly like the setting not working.
+
 ## Not done
 
-- **Phosh's camera app has not been tried**, only `cam`. The phone was at the
-  greeter with no graphical session when the sensor started working.
+- **Colour is poor and the frame rate is low**, both with known causes.
+  libcamera has no tuning file for this sensor and falls back to
+  `uncalibrated.yaml`, and it has no `imx132` entry in its sensor properties
+  database either, so there is no white balance and no colour matrix. The rate
+  is low because the software ISP debayers 2.2 megapixels per frame on the
+  CPU, the GPU path being broken here. Both are worth fixing, and the tuning
+  file is worth contributing upstream.
 - **No auto-exposure or white balance.** libcamera has no tuning file for this
   sensor and falls back to `uncalibrated.yaml`, and it warns that there is no
   entry for `imx132` in its sensor properties database. Both are worth
