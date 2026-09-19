@@ -160,3 +160,88 @@ should be. No errors in dmesg.
   ground.
 - **Only 1920x1080.** Nothing has been tried at 20 MP, where the CMA
   reservation is the thing to watch.
+
+# Front camera sensor: Sony IMX132
+
+`imx132.c`, and `sensor-nodes.dtsi` for the device tree half. Both are
+**written and compiling; neither has ever bound to the sensor**, because that
+needs the device tree node, which needs a flash. The module loads and
+registers on the I2C bus; nothing past that has run.
+
+## Where the numbers came from
+
+There is no register table for this part in any kernel, and the stock Android
+camera stack computes its writes at run time rather than holding one — see
+`../../docs/prior-art.md`. So every value in `imx132_mode_1976x1144` was read
+back from the sensor's own power-on defaults over CCI, and the driver's
+`imx132_configure()` writes them out again. That is closer to an assertion
+than a configuration, and it is written in full so that a second mode has
+something to differ from.
+
+Two independent reasons to trust them. The geometry matches Sony's own device
+tree for this phone exactly — `X_OUTPUT_SIZE` 1976 against Sony's
+`pixel_number_w = <1976>` — and the crop window is self-consistent:
+1975 - 0 + 1 = 1976, and 1171 - 28 + 1 = 1144. The full register dump is in
+`../../docs/camera.md`.
+
+The power sequence is Sony's, taken exactly from their published device tree:
+vdig, vio, vana, reset released, then the clock, with 1 ms between each and
+98 ms held down on the way out.
+
+## Things that are guesses, and how to check them
+
+- **Analogue gain.** The reciprocal law `gain = 256 / (256 - value)` is Sony's
+  usual one and the register is in the usual place, but the maximum is a
+  guess. Sweep it against a fixed scene once frames arrive.
+- **The clock rate.** The driver requires 19.2 MHz because that is what the
+  board supplies and what the sensor was read at. Sony's own driver sets
+  8 MHz. Both cannot be right about what Sony shipped, and the PLL maths
+  below depends on which it is.
+- **Link frequency**, 216 MHz, is `19.2 MHz x 45 / 10` for the pixel clock and
+  then `x 10 bits / 2 lanes / 2` for DDR. If the sensor is actually driven at
+  8 MHz this is wrong by a factor of 2.4.
+- **Lane mapping.** Clock on lane 1 with data on 0 and 2 reproduces Sony's
+  `csi-lane-mask = <0x7>`, and the rear camera's `0x1f` is the same layout
+  with four data lanes. Consistent, but not confirmed by a working link.
+- **Bayer order.** Sony's `subdev_code = 0x3007` is `SBGGR10`, so that is the
+  no-flip order, and the flip table follows from it. A wrong guess here shows
+  up as swapped colours, not as a failure.
+
+## The image to flash
+
+`images/boot-imx132-v1.img` — the running image plus the sensor node, the
+camss `port@2` endpoint and `vdda-supply`, and nothing else.
+
+    tail of the kernel is exactly the previous image's DTB    cmp: equal
+    ramdisk, cmdline, vmlinuz after repack                    all equal
+    strings -a ... | grep -c msm.vram=512m                    1
+    strings -a ... | grep -c max1187x                         1
+    dt-equiv.py boot-imx132-v1.img live.dtb   606 nodes, 6 differences
+
+Every phandle in the new nodes was read back out of the built blob and checked
+against its target: the supplies resolve to `l17`, `l3` and `lvs2`, the clock
+to the MMCC node index 79 (`CAMSS_MCLK2_CLK`), the reset GPIO to TLMM 18, the
+camss `vdda` to `l12`, and the two endpoints to each other. That check earned
+its keep: the clock rate had been written `0x1249f00`, a transposition of
+`0x124f800`, which would have failed the driver's frequency test at probe.
+
+The backup taken beforehand is `images/boot-backup-before-imx132.img`; its
+prefix is byte-identical to `boot-camss-v1.img`, which confirms what the phone
+was running.
+
+After flashing:
+
+    sudo modprobe imx132
+    dmesg | tail -40
+    media-ctl -d /dev/media0 -p | head -30
+
+The first question is whether probe reads the chip ID back — that exercises the
+power sequence, the clock and the CCI bus together. Expect the link itself to
+need work after that.
+
+Note the master clocks are still hung off the `cci` node as well as the sensor
+node. That was a workaround from before there was a sensor driver, and it
+means MCLK runs whether or not the driver asks for it. It should come out once
+the driver is known to manage the clock itself — `sensor-nodes.dtsi` has the
+`&cci` override that removes it, and that override is deliberately **not** in
+the flashed image, so this first test cannot fail for want of a clock.

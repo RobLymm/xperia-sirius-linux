@@ -93,19 +93,19 @@ from the kernel to the sensor data.
       Two bugs surfaced only by running it, both recorded in that README: an
       unreachable VFE clock rate, and a `switch` on SoC version in
       `vfe_src_pad_code` that a grep for `==` does not find.
-- [ ] **Stage 4/5** — sensor drivers for the IMX132 front and the IMX200
-      rear. **This is now the blocker**, but it is a smaller one than it
-      looked. There is no register table to copy anywhere — not in Sony's
-      kernel and not in the stock HAL, which computes the writes at run time
-      (`prior-art.md`). What there is instead: both sensors' power-on
-      defaults, read over CCI, which describe a complete full-resolution mode
-      whose geometry matches Sony's device tree exactly. `camera.md` has them.
-      A driver can start from the defaults rather than from nothing.
-
-      Two smaller things to do alongside, both needing a flash: add
-      `vdda-supply = <&pm8941_l12>` to the camss node, which a real sensor
-      needs and the test pattern did not, and add the sensor nodes and CSI
-      endpoints once there is a driver to bind them.
+- [ ] **Stage 4** — IMX132 front sensor. **Driver written, compiles, loads,
+      never bound.** `../drivers/camera/imx132.c` and `sensor-nodes.dtsi`.
+      **Flash `images/boot-imx132-v1.img`** — the running image plus the
+      sensor node, the camss `port@2` endpoint and `vdda-supply`, 606 nodes
+      and 6 differences, both `strings` checks pass, backup at
+      `images/boot-backup-before-imx132.img`. Then `sudo modprobe imx132` and
+      read dmesg: the first question is whether probe reads the chip ID back,
+      which exercises the power sequence, the clock and the bus together.
+      That directory's README lists what in the driver is measured and what
+      is still a guess.
+- [ ] **Stage 5** — IMX200 rear sensor, plus the BU64296G autofocus actuator
+      and the flash. Same method as the front, larger: 20.7 MP over four
+      lanes.
 
 **Done when** a still is captured from each camera and a video is recorded
 from the rear one.

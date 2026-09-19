@@ -99,7 +99,7 @@ from the device on 2026-09-19.
 | Battery gauge | PM8941 VADC | Working | Percentage from VBAT_SNS and an OCV table |
 | Charger | PM8941 SMBB | Working | USB and DC inputs both present |
 | Rear camera sensor | **Sony IMX200** | Detected, no driver | Answers on CCI, identifies itself. No driver exists for this part anywhere |
-| Front camera sensor | **Sony IMX132** | Detected, no driver | Answers on CCI. Only out-of-tree driver is in the unusable `staging/atomisp` |
+| Front camera sensor | **Sony IMX132** | Driver written, untested | `drivers/camera/imx132.c`, built from the sensor's own power-on defaults read over CCI, because no register table for this part exists anywhere. Never bound: that needs a flash |
 | Autofocus actuator | Rohm BU64296G | Detected, no driver | At 0x0c on the rear camera bus |
 | Camera module EEPROMs | | Readable | Both, at 0x50. Carry the module and sensor part numbers as ASCII |
 | Camera control bus | Qualcomm CCI | Working | Both masters enumerate; mainline `i2c-qcom-cci` binds |
@@ -133,7 +133,9 @@ renderer.
                         with two fixes; not yet in the kernel package
     drivers/camera/     camera ISP: msm8974 support for mainline's CAMSS
                         driver, and its device tree node. Captures frames
-                        from the CSID test pattern generator
+                        from the CSID test pattern generator. Also the
+                        IMX132 front sensor driver, written but not yet
+                        bound to the sensor
     panel-variants/     the six panel configurations extracted from stock,
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs

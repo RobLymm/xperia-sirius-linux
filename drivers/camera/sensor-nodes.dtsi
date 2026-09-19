@@ -1,0 +1,73 @@
+/*
+ * Camera sensors. The master clocks move here from the cci node, where they
+ * were parked only so that something would keep them running while there was
+ * no sensor driver to ask for them.
+ */
+&cci {
+	clocks = <&mmcc CAMSS_TOP_AHB_CLK>,
+		 <&mmcc CAMSS_CCI_CCI_AHB_CLK>,
+		 <&mmcc CAMSS_CCI_CCI_CLK>;
+	clock-names = "camss_top_ahb",
+		      "cci_ahb",
+		      "cci";
+};
+
+&cci_i2c1 {
+	/* Front camera: Sony IMX132, 2.4 MP, two lanes, no autofocus. */
+	imx132: camera@36 {
+		compatible = "sony,imx132";
+		reg = <0x36>;
+
+		clocks = <&mmcc CAMSS_MCLK2_CLK>;
+		assigned-clocks = <&mmcc CAMSS_MCLK2_CLK>;
+		assigned-clock-rates = <19200000>;
+
+		vana-supply = <&pm8941_l17>;	/* 2.7 V analogue */
+		vdig-supply = <&pm8941_l3>;	/* 1.2 V digital core */
+		vif-supply = <&pm8941_lvs2>;	/* I/O, and the I2C pull-ups */
+
+		reset-gpios = <&tlmm 18 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cam_front_default>;
+
+		port {
+			/*
+			 * Clock on lane 1 with data on 0 and 2 is what Sony's
+			 * csi-lane-mask of 0x7 describes: bits 0, 1 and 2 set.
+			 * The rear camera's 0x1f is the same layout with four
+			 * data lanes.
+			 */
+			imx132_ep: endpoint {
+				clock-lanes = <1>;
+				data-lanes = <0 2>;
+				link-frequencies = /bits/ 64 <216000000>;
+				remote-endpoint = <&csiphy2_ep>;
+			};
+		};
+	};
+};
+
+&camss {
+	vdda-supply = <&pm8941_l12>;	/* 1.8 V MIPI supply for the CSIDs */
+
+	ports {
+		port@2 {
+			reg = <2>;
+
+			csiphy2_ep: endpoint {
+				clock-lanes = <1>;
+				data-lanes = <0 2>;
+				remote-endpoint = <&imx132_ep>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	cam_front_default: cam-front-default-state {
+		pins = "gpio18";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
