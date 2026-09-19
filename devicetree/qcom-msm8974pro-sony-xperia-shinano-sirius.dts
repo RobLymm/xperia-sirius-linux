@@ -342,6 +342,10 @@
 };
 
 /* Rails the Z2 needs held on that the Shinano common tree does not mark. */
+&pm8941_l3 {
+	regulator-always-on;
+};
+
 &pm8941_l16 {
 	regulator-always-on;
 };
@@ -352,6 +356,35 @@
 
 &pm8941_l18 {
 	regulator-always-on;
+};
+
+/* Camera autofocus, 2.8 V: the Rohm BU64296G voice-coil driver. */
+&pm8941_l23 {
+	regulator-always-on;
+};
+
+/*
+ * Camera control bus. The two master clocks are hung off this node rather than
+ * off sensor nodes because the CCI driver calls devm_clk_bulk_get_all() and
+ * enables everything it finds: a sensor needs INCK running before it will
+ * answer, and the driver's runtime PM otherwise only clocks the bus for the
+ * duration of a transfer.
+ *
+ * Rear IMX200 on master 0 at 0x10, front IMX132 on master 1 at 0x36. The
+ * sensor nodes themselves wait on their drivers.
+ */
+&cci {
+	clocks = <&mmcc CAMSS_TOP_AHB_CLK>,
+		 <&mmcc CAMSS_CCI_CCI_AHB_CLK>,
+		 <&mmcc CAMSS_CCI_CCI_CLK>,
+		 <&mmcc CAMSS_MCLK0_CLK>,
+		 <&mmcc CAMSS_MCLK2_CLK>;
+	clock-names = "camss_top_ahb",
+		      "cci_ahb",
+		      "cci",
+		      "mclk0",
+		      "mclk2";
+	status = "okay";
 };
 
 /* Backlight: PM8941 WLED driving two strings. */
@@ -430,12 +463,20 @@
 };
 
 /*
- * lvs1 is not declared in the Shinano common tree at all; the sensors on
- * blsp2_i2c6 take their I/O supply from it.
+ * Neither lvs1 nor lvs2 is declared in the Shinano common tree. The sensors on
+ * blsp2_i2c6 take their I/O supply from lvs1.
+ *
+ * lvs2 is the cameras' vio rail, and it powers their I2C as well as their I/O.
+ * Without it every CCI transfer returns "Operation timed out" and the bus
+ * looks broken rather than empty; see docs/handover-camera.md.
  */
 &rpm_requests {
 	regulators-1 {
 		pm8941_lvs1: lvs1 {
+			regulator-always-on;
+		};
+
+		pm8941_lvs2: lvs2 {
 			regulator-always-on;
 		};
 	};
@@ -526,6 +567,23 @@
 		pins = "gpio58", "gpio59", "gpio60", "gpio61";
 		function = "qua_mi2s";
 		drive-strength = <8>;
+		bias-disable;
+	};
+};
+
+/* The camera master clocks, added to the CCI pin state the SoC tree defines. */
+&cci_default {
+	cam-mclk0-default-pins {
+		pins = "gpio15";
+		function = "cam_mclk0";
+		drive-strength = <4>;
+		bias-disable;
+	};
+
+	cam-mclk2-default-pins {
+		pins = "gpio17";
+		function = "cam_mclk2";
+		drive-strength = <4>;
 		bias-disable;
 	};
 };

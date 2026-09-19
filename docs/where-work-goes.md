@@ -157,14 +157,18 @@ The phone runs `images/boot-cam-v2.img` — confirmed against `/sys/firmware/fdt
 answer. `i2c-qcom-cci` is hand-built in `/lib/modules/6.16.12/updates/cci/`,
 and the eleven V4L2 media core modules are hand-built in
 `/lib/modules/6.16.12/updates/media/`. Nothing in the kernel package builds
-either, and the board file in this repository does not yet carry the camera
-device tree changes that image has.
+either.
+
+The board file now does carry the camera device tree changes that image has —
+the `cci` node's clocks and status, `lvs2`, `l3` and `l23` held on, and the
+two camera MCLK pin states — so the repository can rebuild what the phone is
+running. That gap is closed; the packaging one is not.
 
 `handover-camera.md` holds the state and the reproduction steps, and
 `camera.md` the hardware. The one thing worth repeating here, because it is
 not camera-specific: **out-of-tree modules for this phone need a
 `Module.symvers` that the kernel tree does not have**, and
-`tools/harvest-symvers.py` plus `tools/fill-symvers.sh` build one from the
+`tools/harvest-symvers.py` plus `tools/fill-symvers.py` build one from the
 running kernel's own CRCs. Any module work on this device needs them, not
 just the camera.
 

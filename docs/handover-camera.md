@@ -140,17 +140,31 @@ module work on this phone, not just the camera:
   vmlinux entries. 564 modules give about 5,300 symbols. Symbols a module
   exports rather than vmlinux are dropped, found by reading
   `__ksymtab_strings` — `nm` does not show them.
-- `~/fill-symvers.sh <symbol>...` covers the rest: genksyms in this tree
+- `~/fill-symvers.py <symbol>...` covers the rest: genksyms in this tree
   produces the same CRCs, so it builds whichever object exports the symbol and
   reads the `#SYMVER` lines out of its `.o.cmd`.
 
 **The two agree exactly** — 18 symbols in common, 18 matches, no mismatch —
-which is what makes the harvested file trustworthy. Two traps in
-`fill-symvers.sh` worth not rediscovering: a symbol can be exported from
-several files of which this configuration builds only one (`mm/nommu.c` sorts
-before `mm/vmalloc.c` and is the wrong one), and namespaced exports
-(`EXPORT_SYMBOL_NS_GPL(dma_buf_fd, "DMA_BUF")`) must keep their namespace or
-modpost stops checking `MODULE_IMPORT_NS`.
+which is what makes the harvested file trustworthy.
+
+**The trap that actually bit**, and the reason `fill-symvers.py` is more than
+a grep: a symbol is often exported from several files, only one of which this
+configuration builds, and taking the first is wrong *silently*.
+`clk_round_rate` is exported by both `drivers/clk/clk.c` and
+`drivers/sh/clk/core.c`; the SuperH one sorts first, `make` will build any
+object you name whether or not the config wants it, and its CRC is
+`0xca8cae5d` against the real `0x43f81957`. Nothing complains until the module
+is loaded and the kernel says `disagrees about version of symbol
+clk_round_rate`. `mm/nommu.c` against `mm/vmalloc.c` is the same shape.
+
+So the tool accepts a candidate only if kbuild would build it: it walks from
+the file's directory up to the tree root and checks each parent Makefile pulls
+the child in with an `obj-` rule whose CONFIG is set — `drivers/Makefile` has
+`obj-$(CONFIG_SUPERH) += sh/`, and that is what rejects the SuperH file. If
+two accepted candidates still disagree it prints `AMBIG` and adds nothing.
+
+One more: namespaced exports (`EXPORT_SYMBOL_NS_GPL(dma_buf_fd, "DMA_BUF")`)
+must keep their namespace, or modpost stops checking `MODULE_IMPORT_NS`.
 
 ## What remains, in order
 

@@ -1,0 +1,163 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] ARM: dts: qcom: msm8974: add the camss node
+
+Three CSIPHY, four CSID, one ISPIF and two VFE, with the clocks and the VFE
+GDSC from mmcc-msm8974. Addresses and interrupts agree across Sony's published
+msm8974-camera.dtsi, the stock device tree read off an Xperia Z2, and z3ntu's
+Nexus 5 work.
+
+Disabled by default: it is only useful on a board that also describes sensors,
+and the ports are left for the board file to fill in.
+
+There is deliberately no iommus property. msm8974's camera subsystem has no
+IOMMU, which is why the driver takes contiguous buffers from CMA here.
+
+NOT yet tested on hardware.
+
+--- a/arch/arm/boot/dts/qcom/qcom-msm8974.dtsi
++++ b/arch/arm/boot/dts/qcom/qcom-msm8974.dtsi
+@@ -2100,6 +2100,144 @@
+ 			};
+ 		};
+ 
++		camss: camss@fda0ac00 {
++			compatible = "qcom,msm8974-camss";
++
++			reg = <0xfda0ac00 0x200>,
++			      <0xfda00030 0x4>,
++			      <0xfda0b000 0x200>,
++			      <0xfda00038 0x4>,
++			      <0xfda0b400 0x200>,
++			      <0xfda00040 0x4>,
++			      <0xfda08000 0x100>,
++			      <0xfda08400 0x100>,
++			      <0xfda08800 0x100>,
++			      <0xfda08c00 0x100>,
++			      <0xfda0a000 0x500>,
++			      <0xfda00020 0x10>,
++			      <0xfda10000 0x1000>,
++			      <0xfda14000 0x1000>;
++			reg-names = "csiphy0",
++				    "csiphy0_clk_mux",
++				    "csiphy1",
++				    "csiphy1_clk_mux",
++				    "csiphy2",
++				    "csiphy2_clk_mux",
++				    "csid0",
++				    "csid1",
++				    "csid2",
++				    "csid3",
++				    "ispif",
++				    "csi_clk_mux",
++				    "vfe0",
++				    "vfe1";
++
++			interrupts = <GIC_SPI 78 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 79 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 80 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 51 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 52 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 53 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 54 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 55 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 57 IRQ_TYPE_EDGE_RISING>,
++				     <GIC_SPI 58 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "csiphy0",
++					  "csiphy1",
++					  "csiphy2",
++					  "csid0",
++					  "csid1",
++					  "csid2",
++					  "csid3",
++					  "ispif",
++					  "vfe0",
++					  "vfe1";
++
++			power-domains = <&mmcc CAMSS_VFE_GDSC>;
++
++			clocks = <&mmcc CAMSS_TOP_AHB_CLK>,
++				 <&mmcc CAMSS_ISPIF_AHB_CLK>,
++				 <&mmcc CAMSS_PHY0_CSI0PHYTIMER_CLK>,
++				 <&mmcc CAMSS_PHY1_CSI1PHYTIMER_CLK>,
++				 <&mmcc CAMSS_PHY2_CSI2PHYTIMER_CLK>,
++				 <&mmcc CAMSS_CSI0_AHB_CLK>,
++				 <&mmcc CAMSS_CSI0_CLK>,
++				 <&mmcc CAMSS_CSI0PHY_CLK>,
++				 <&mmcc CAMSS_CSI0PIX_CLK>,
++				 <&mmcc CAMSS_CSI0RDI_CLK>,
++				 <&mmcc CAMSS_CSI1_AHB_CLK>,
++				 <&mmcc CAMSS_CSI1_CLK>,
++				 <&mmcc CAMSS_CSI1PHY_CLK>,
++				 <&mmcc CAMSS_CSI1PIX_CLK>,
++				 <&mmcc CAMSS_CSI1RDI_CLK>,
++				 <&mmcc CAMSS_CSI2_AHB_CLK>,
++				 <&mmcc CAMSS_CSI2_CLK>,
++				 <&mmcc CAMSS_CSI2PHY_CLK>,
++				 <&mmcc CAMSS_CSI2PIX_CLK>,
++				 <&mmcc CAMSS_CSI2RDI_CLK>,
++				 <&mmcc CAMSS_CSI3_AHB_CLK>,
++				 <&mmcc CAMSS_CSI3_CLK>,
++				 <&mmcc CAMSS_CSI3PHY_CLK>,
++				 <&mmcc CAMSS_CSI3PIX_CLK>,
++				 <&mmcc CAMSS_CSI3RDI_CLK>,
++				 <&mmcc CAMSS_VFE_VFE0_CLK>,
++				 <&mmcc CAMSS_CSI_VFE0_CLK>,
++				 <&mmcc CAMSS_VFE_VFE1_CLK>,
++				 <&mmcc CAMSS_CSI_VFE1_CLK>,
++				 <&mmcc CAMSS_VFE_VFE_AHB_CLK>,
++				 <&mmcc CAMSS_VFE_VFE_AXI_CLK>;
++			clock-names = "top_ahb",
++				      "ispif_ahb",
++				      "csiphy0_timer",
++				      "csiphy1_timer",
++				      "csiphy2_timer",
++				      "csi0_ahb",
++				      "csi0",
++				      "csi0_phy",
++				      "csi0_pix",
++				      "csi0_rdi",
++				      "csi1_ahb",
++				      "csi1",
++				      "csi1_phy",
++				      "csi1_pix",
++				      "csi1_rdi",
++				      "csi2_ahb",
++				      "csi2",
++				      "csi2_phy",
++				      "csi2_pix",
++				      "csi2_rdi",
++				      "csi3_ahb",
++				      "csi3",
++				      "csi3_phy",
++				      "csi3_pix",
++				      "csi3_rdi",
++				      "vfe0",
++				      "csi_vfe0",
++				      "vfe1",
++				      "csi_vfe1",
++				      "vfe_ahb",
++				      "vfe_axi";
++
++			/*
++			 * No iommus property: msm8974's camera subsystem has
++			 * no IOMMU, which is why camss takes contiguous
++			 * buffers from CMA here rather than scatter-gather.
++			 */
++			status = "disabled";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				/*
++				 * port@0 -> CSIPHY0, the rear IMX200 on 4 lanes
++				 * port@2 -> CSIPHY2, the front IMX132 on 2 lanes
++				 * Filled in by the board file, with the sensor
++				 * nodes on the CCI buses.
++				 */
++			};
++		};
++
+ 		cci: cci@fda0c000 {
+ 			compatible = "qcom,msm8974-cci";
+ 			#address-cells = <1>;

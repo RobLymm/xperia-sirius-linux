@@ -19,7 +19,7 @@
 set -e
 KDIR=${KDIR:-$HOME/kbuild/linux-6.16.12}
 J=${J:-3}
-FILL=${FILL:-$(dirname "$0")/fill-symvers.sh}
+FILL=${FILL:-$(dirname "$0")/fill-symvers.py}
 D="${1:?usage: kbuild-mod.sh <dir> [CONFIG_X=m ...]}"
 shift
 cd "$KDIR"
@@ -37,7 +37,7 @@ syms=$(grep -oE '"[A-Za-z_][A-Za-z0-9_]*" \[' "$log" | tr -d '"[ ' | sort -u | t
 if [ -n "$syms" ]; then
 	echo "== filling $(echo "$syms" | wc -w) symbol(s) =="
 	# shellcheck disable=SC2086
-	J="$J" sh "$FILL" $syms
+	J="$J" python3 "$FILL" $syms
 fi
 
 echo "== $D: pass 2, strict =="

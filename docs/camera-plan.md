@@ -105,9 +105,10 @@ two EEPROMs with `i2ctransfer` on the CCI buses.
 EEPROMs were read. `handover-camera.md` has the commands and the four traps.
 The phone runs `images/boot-cam-v2.img`, which carries this tree.
 
-## Stage 3 — CAMSS for msm8974
+## Stage 3 — CAMSS for msm8974 — written, compiles, untested
 
-A patch to `drivers/media/platform/qcom/camss`:
+Two patches in `../drivers/camera/`, with that directory's README for the
+reasoning. What they do:
 
 - an `msm8974_resources` table: 3 CSIPHY, 4 CSID, 1 ISPIF, 2 VFE, using the
   msm8916 (`CAMSS_8x16`, VFE 4.1) code paths, with msm8974's register names,
@@ -122,7 +123,8 @@ A patch to `drivers/media/platform/qcom/camss`:
   on top of the GPU carveout
 
 **Done when** `media-ctl -p` shows the full CSIPHY → CSID → ISPIF → VFE graph,
-and a capture from a CSID test pattern generator produces frames.
+and a capture from a CSID test pattern generator produces frames. Neither can
+happen until the device tree node is flashed, which is the next step.
 
 ## Stage 4 — front sensor driver (IMX132)
 

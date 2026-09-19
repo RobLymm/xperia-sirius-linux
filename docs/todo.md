@@ -85,13 +85,17 @@ Staged in `camera-plan.md`. Two stages are done, and the gate has moved.
       answer and identify themselves from the silicon: rear **IMX200**, front
       **IMX132**. The phone runs `images/boot-cam-v2.img`, which carries the
       tree this needs.
-- [ ] **Stage 3** — re-express the msm8974 CAMSS support for 6.16. **This is
-      now the gate**: no `/dev/video*` can exist until it lands, so neither
-      sensor driver nor libcamera nor the camera app can be tested. The Nexus
-      5 patch is from 5.17 and its structure has since changed to per-SoC
-      resource tables, so it cannot be applied as it stands. `camera.md` has
-      the implementation spec, the clock map and the four places camss
-      branches on SoC version.
+- [ ] **Stage 3** — msm8974 CAMSS for 6.16. **Written, compiles, untested.**
+      Two patches in `../drivers/camera/`: the driver and the device tree
+      node. `qcom-camss.ko` links clean out of tree, and the device tree
+      change produces exactly the ten intended differences and nothing else.
+      Nothing has run, because the driver cannot bind until the node is in a
+      flashed image. **That flash is the next thing to do**, and it is worth
+      doing before either sensor driver is written: it turns the rest of the
+      camera work from theory into something testable.
+
+      **Done when** `media-ctl -p` shows the CSIPHY → CSID → ISPIF → VFE
+      graph and a CSID test pattern produces frames.
 - [ ] **Stage 4/5** — sensor drivers for the IMX132 front and the IMX200
       rear. Sony's published kernel gives the power sequences exactly and
       **no register or mode tables at all**; those were in the userspace HAL
