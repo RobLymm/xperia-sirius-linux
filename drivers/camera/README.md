@@ -7,16 +7,17 @@ subsystem state, the hardware map and the sensor work are in
 [`../../docs/camera.md`](../../docs/camera.md); this file is about the
 patches.
 
-**They compile and they have not run.** `qcom-camss.ko` builds clean against
-6.16.12 as an out-of-tree module, but the driver cannot bind until the camss
-device tree node is in a flashed image, so nothing here has been exercised on
-hardware. Treat every claim below as reasoned from the register maps, not
+**The module builds and loads; the driver has never bound to anything.**
+`qcom-camss.ko` links clean against 6.16.12 out of tree, loads, and registers
+at `/sys/bus/platform/drivers/qcom-camss` — but there is no device for it
+until the camss node is in a flashed image, so no probe path has run. Treat
+every claim below about the hardware as reasoned from the register maps, not
 observed.
 
 | | |
 |---|---|
 | `0001-media-camss-add-msm8974-support.patch` | the driver: resource tables, a new SoC version, and a buffer path that works without an IOMMU |
-| `0002-ARM-dts-qcom-msm8974-add-the-camss-node.patch` | the node, disabled by default |
+| `0002-ARM-dts-qcom-msm8974-add-the-camss-node.patch` | the node, disabled by default; a board enables it |
 
 ## Why msm8974 needs its own version enum
 
@@ -101,7 +102,8 @@ needs. Then:
 
 Checked:
 
-- `qcom-camss.ko` links with no unresolved symbols.
+- `qcom-camss.ko` links with no unresolved symbols, loads, and registers its
+  platform driver, pulling in the media core as dependencies.
 - The device tree change produces exactly ten differences against the tree
   before it — the camss node and its `ports`, the `lvs2` regulator, the two
   camera MCLK pin states, `regulator-always-on` on `l3` and `l23`, and the
@@ -112,7 +114,8 @@ Checked:
 
 Not checked, because it needs a flash:
 
-- that the driver probes at all;
+- that the driver probes at all — nothing past `platform_driver_register` has
+  executed;
 - that the ISPIF and dual-VFE paths behave — 8x16 ships one VFE, so two is
   new ground;
 - that `media-ctl -p` shows the CSIPHY → CSID → ISPIF → VFE graph;
@@ -121,3 +124,46 @@ Not checked, because it needs a flash:
 The first flash is worth doing before either sensor driver is written: it
 turns the whole of the rest of the camera work from theory into something
 testable.
+
+## The image to flash
+
+`images/boot-camss-v1.img`, also on the phone at `~/boot-camss-v1.img`. It is
+**the image the phone is already running with the camss node added and nothing
+else changed**, which is why it was built by editing that image's device tree
+rather than from source: the repository cannot yet rebuild the running tree.
+Building the codec variant from the board file and patch 0012 still lands 87
+differences and 35 nodes short of what the phone runs — thermal trip points,
+remoteproc power domains and interconnect clocks that came from kernel patches
+not published here. A source-built image would therefore be a regression, so
+this one reuses `boot-cam-v2.img`'s own kernel, ramdisk and command line
+byte for byte.
+
+What was checked before handing it over:
+
+    tail of the kernel is exactly cam-v2.dtb                     cmp: equal
+    ramdisk, cmdline, vmlinuz after repack                       all equal
+    strings -a boot-camss-v1.img | grep -c msm.vram=512m         1
+    strings -a boot-camss-v1.img | grep -c max1187x              1
+    dt-equiv.py boot-camss-v1.img live.dtb    604 nodes, 2 differences
+                                              /soc/camss@fda0ac00 and its ports
+
+and inside the node, read back out of the built blob: 31 clocks and the
+power domain all resolving to `/soc/clock-controller@fd8c0000`, power-domain
+index 3 (`CAMSS_VFE_GDSC`), 14 reg ranges, 10 interrupts, and `status =
+"okay"` — the SoC patch leaves it disabled, and this image is what a board
+file enabling it would produce.
+
+The backup taken from the boot partition **before** flashing, as the rules
+require, is `images/boot-backup-before-camss.img`. Its first 17803264 bytes
+are byte-identical to `boot-cam-v2.img`, which independently confirms what the
+phone was running.
+
+`qcom-camss.ko` is already installed at
+`/lib/modules/6.16.12/updates/media/`, so after flashing:
+
+    sudo modprobe qcom-camss
+    dmesg | tail -40
+    media-ctl -p          # if v4l-utils is installed
+
+The interesting question is whether probe gets through the clocks and the VFE
+GDSC. Expect it not to work first time.

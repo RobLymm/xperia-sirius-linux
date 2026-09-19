@@ -161,8 +161,19 @@ either.
 
 The board file now does carry the camera device tree changes that image has —
 the `cci` node's clocks and status, `lvs2`, `l3` and `l23` held on, and the
-two camera MCLK pin states — so the repository can rebuild what the phone is
-running. That gap is closed; the packaging one is not.
+two camera MCLK pin states.
+
+**But the repository still cannot rebuild the tree the phone runs.** Measured
+on 2026-09-19: building the codec variant from the board file with patch 0012
+applied gives 569 nodes against the live tree's 604, and 87 differences.
+What is missing is not camera-related — thermal trip points, `power-domains`
+and `cx-supply` on all three remoteprocs, and interconnect clocks — and it
+came from kernel patches that are not in this repository. Until that is
+chased down, an image built from source here is a **regression** against what
+the phone is running, and the way to make a test image is to edit the device
+tree of an image known to boot and check the difference is only what you
+intended. `../drivers/camera/README.md` does exactly that and shows the
+checks.
 
 `handover-camera.md` holds the state and the reproduction steps, and
 `camera.md` the hardware. The one thing worth repeating here, because it is

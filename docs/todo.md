@@ -89,10 +89,18 @@ Staged in `camera-plan.md`. Two stages are done, and the gate has moved.
       Two patches in `../drivers/camera/`: the driver and the device tree
       node. `qcom-camss.ko` links clean out of tree, and the device tree
       change produces exactly the ten intended differences and nothing else.
-      Nothing has run, because the driver cannot bind until the node is in a
-      flashed image. **That flash is the next thing to do**, and it is worth
-      doing before either sensor driver is written: it turns the rest of the
-      camera work from theory into something testable.
+      The module loads and registers its platform driver, but no probe path
+      has run, because the driver cannot bind until the node is in a flashed
+      image.
+
+      **The next thing to do is flash `images/boot-camss-v1.img`.** It is the
+      image the phone is already running with the camss node added and nothing
+      else changed — 604 nodes, 2 differences against the live tree, and both
+      pre-flight `strings` checks pass. The backup taken from the partition
+      beforehand is `images/boot-backup-before-camss.img`. Then
+      `sudo modprobe qcom-camss` and read `dmesg`. Expect it not to work first
+      time; the interesting part is how far probe gets through the clocks and
+      the VFE GDSC.
 
       **Done when** `media-ctl -p` shows the CSIPHY → CSID → ISPIF → VFE
       graph and a CSID test pattern produces frames.
