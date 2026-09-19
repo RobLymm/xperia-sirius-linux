@@ -8,10 +8,9 @@ Calls, SMS, mobile data, Wi-Fi, Bluetooth, GNSS, FM radio, the display,
 touch, the sensors and the full 300 MHz to 2265.6 MHz range of all four CPU
 cores work. Audio works for the loudspeakers, earpiece, headphones and
 recording, and a call carries the caller's voice and anything the phone
-plays, but not yet what its microphone hears. The camera does not take
-pictures yet, though everything up to the sensors does work: the control bus,
-the media core and the ISP all run, and only the two sensor drivers are
-missing. Suspend is off because resume loses Wi-Fi and touch.
+plays, but not yet what its microphone hears. The front camera takes pictures;
+the rear one has no driver yet. Suspend is off because resume loses Wi-Fi and
+touch.
 
 **If you have a Z2 and want it running like this one, start with
 [docs/from-stock-to-this.md](docs/from-stock-to-this.md).** It is the whole
@@ -59,7 +58,7 @@ the others listed there.
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
-| Camera | No pictures yet; the ISP works and the front sensor is halfway | Everything up to the sensors is working. Both are identified from the silicon over CCI — rear **IMX200**, front **IMX132** — the V4L2 media core is built and loaded, and msm8974 CAMSS now probes and captures: `media-ctl` shows the full CSIPHY → CSID → ISPIF → VFE graph and CSID0's test pattern generator produces correct 1920x1080 SRGGB10 frames. What is left is the two sensor drivers, which exist nowhere and whose register tables are in no kernel — not even Sony's. `docs/camera.md`, `docs/camera-plan.md`, `drivers/camera/` |
+| Camera | **The front camera works** | The IMX132 captures 1976x1144 Bayer through the msm8974 CAMSS driver, and libcamera's software ISP turns it into colour: `cam -l` lists it and `cam --capture` produces correct images. What is left is auto-exposure and white balance, Phosh's camera app, which has not been tried yet, and the whole of the rear IMX200. `docs/camera.md`, `drivers/camera/` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. ModemManager can enable it directly with `--location-enable-gps-nmea`. A fix needs sky. `modem/` |
 | Mobile data | Working | A bearer comes up through NetworkManager and `wwan0` gets an address; verified by pinging and fetching a page bound to that interface rather than trusting the default route. On GPRS it is slow, and the modem has not yet been persuaded to carry data on anything faster. `modem/`, `docs/modem.md` |
 | SMS | Working | Sending and receiving both tested |
@@ -99,7 +98,7 @@ from the device on 2026-09-19.
 | Battery gauge | PM8941 VADC | Working | Percentage from VBAT_SNS and an OCV table |
 | Charger | PM8941 SMBB | Working | USB and DC inputs both present |
 | Rear camera sensor | **Sony IMX200** | Detected, no driver | Answers on CCI, identifies itself. No driver exists for this part anywhere |
-| Front camera sensor | **Sony IMX132** | Driver binds, does not stream yet | `drivers/camera/imx132.c`. Probe reads the chip ID back and the sensor appears in the media graph as `SBGGR10_1X10/1976x1144` linked to CSIPHY2, but asking for frames gives `VFE sof timeout` and nothing reaches the receiver. That directory's README has the diagnosis so far |
+| Front camera sensor | **Sony IMX132** | Working | `drivers/camera/imx132.c`. Captures 1976x1144 SBGGR10, and libcamera's software ISP turns it into colour. No auto-exposure or white balance yet, and libcamera needs the CPU debayer because the GPU one fails on this Adreno |
 | Autofocus actuator | Rohm BU64296G | Detected, no driver | At 0x0c on the rear camera bus |
 | Camera module EEPROMs | | Readable | Both, at 0x50. Carry the module and sensor part numbers as ASCII |
 | Camera control bus | Qualcomm CCI | Working | Both masters enumerate; mainline `i2c-qcom-cci` binds |

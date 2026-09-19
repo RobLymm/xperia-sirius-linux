@@ -129,7 +129,7 @@ pattern generator captures ten correct 1920x1080 SRGGB10 frames through
 ISPIF0 and VFE0 RDI0. No sensor is attached, so nothing past the ISP is
 proven.
 
-## Stage 4 — front sensor driver (IMX132)
+## Stage 4 — front sensor driver (IMX132) — done, 2026-09-19
 
 Front first: 2 MP, two lanes, no autofocus, so the smallest driver and the
 quickest end-to-end proof.
@@ -140,8 +140,11 @@ quickest end-to-end proof.
   table, link frequency, exposure, analogue gain, test pattern
 - device tree endpoint to CSIPHY 2
 
-**Done when** `v4l2-ctl --stream-mmap` captures valid Bayer frames from the
-front camera.
+**Done:** `v4l2-ctl --stream-mmap` captures 1976x1144 SBGGR10 frames, and
+libcamera's `simple` pipeline handler lists the camera and produces correct
+ABGR8888 images through its software ISP. The driver is
+`../drivers/camera/imx132.c`; that directory's README records the three things
+that had to be right before anything streamed.
 
 ## Stage 5 — rear sensor driver (IMX200)
 
@@ -165,6 +168,8 @@ then Snapshot or Megapixels on Phosh.
                   └─► 3 CAMSS ──────────────────────────┴─► 6 userspace
                                      5 rear sensor ─────┘
 
-Stages 1, 2 and 3 are done. **Stage 4 is now the blocker**, and its own
-blocker is not the driver but the data: the IMX132's register and mode tables
-are in no kernel and have to be recovered from the stock camera blobs.
+Stages 1 to 4 are done, and stage 6 is most of the way there: libcamera sees
+the front camera and captures from it. What is left is **stage 5**, the rear
+IMX200 and its autofocus, and the tuning half of stage 6 — auto-exposure,
+white balance and a libcamera tuning file — plus trying Phosh's camera app,
+which has not been run yet.

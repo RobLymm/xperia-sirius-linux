@@ -42,32 +42,22 @@ to be the s2idle resume path, so it may fall out of the suspend work. Days.
 
 ## Blocking for some people, not for all
 
-**Camera.** Still the largest single piece of work here, but two of its six
-stages are done and neither of them turned out to be the expensive part. The
-control bus works and both sensors identify themselves from the silicon; the
-V4L2 media core is built and loaded, and that needed no kernel rebuild and no
-flash, because every part of the media stack is a module and the three things
-it needs built in were already there for the GPU.
+**Camera.** The front camera works: the IMX132 captures 1976x1144 Bayer
+through the msm8974 CAMSS driver, and libcamera's software ISP turns it into
+colour. Five of the six stages are done — media core, control bus, ISP, front
+sensor, and most of userspace.
 
-The ISP is done too, and took a day rather than the weeks estimated: msm8974
-CAMSS is re-expressed for 6.16, probes clean, and captures frames from its
-test pattern generator. Every address, interrupt and clock it needed was
-already known from three independent sources, and mainline's `mmcc-msm8974`
-already had every clock.
+What is left is the **rear IMX200**, and it is harder than the front turned
+out to be. The front was unlocked by Intel's old atomisp driver, which
+published the vendor MIPI registers and D-PHY timings that are zero at reset
+and exist in no other source. Nothing equivalent has been found for the
+IMX200, and those registers cannot be read out of a sensor that is not already
+streaming. Add to that the autofocus actuator and the flash. Weeks, unless a
+table turns up.
 
-**What is left is the two sensor drivers.** The obstacle was expected to be
-the register tables, which are in no kernel, Sony's included, and turn out not
-to be in the stock camera HAL either — it computes the writes at run time, so
-there is nothing to extract. What replaces them is better than it sounds: both
-sensors' power-on defaults were read over CCI and describe a complete
-full-resolution mode, 5248 x 3936 for the rear and 1976 x 1144 for the front,
-matching Sony's device tree exactly. A driver starts from those rather than
-from nothing.
-
-Still weeks rather than days — exposure, gain, link frequency, the smaller
-preview modes and the autofocus all have to be worked out on hardware — but
-the part that looked like blind reverse-engineering is now mostly a matter of
-reading registers. See `camera-plan.md` and `camera.md`.
+Then **tuning**: auto-exposure, white balance and a libcamera tuning file.
+Without them the images are flat and slightly green. That is a known, bounded
+job rather than an unknown one.
 
 **NFC.** Not working, and not merely untested: there is no NFC node in the
 booted device tree and no driver loaded. The mainline driver supports the

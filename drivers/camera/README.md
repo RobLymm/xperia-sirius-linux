@@ -165,92 +165,98 @@ should be. No errors in dmesg.
 
 `imx132.c`, and `sensor-nodes.dtsi` for the device tree half.
 
-**The driver binds and the sensor is in the media graph; it does not stream
-yet.** Probe reads the chip ID back, which exercises the power sequence, the
-19.2 MHz clock and the CCI bus together. The subdev appears as a Sensor
-entity reporting `SBGGR10_1X10/1976x1144` with crop `(0,28)/1976x1144` and an
-immutable link into CSIPHY2, and the whole pipeline down to `/dev/video0`
-configures. Asking it for frames gives
+**It works.** The front camera captures frames on mainline Linux, and
+libcamera turns them into correct colour images.
 
-    qcom-camss fda0ac00.camss: VFE sof timeout
+![first frame](first-frame.png)
 
-and the CSIPHY interrupt count does not move, so nothing is reaching the
-receiver.
+A ceiling with downlights, taken with the phone face up on a desk — through
+the IMX132, CSIPHY2, CSID0, ISPIF, VFE0 and libcamera's software ISP. It is
+flat and slightly green because there is no auto-exposure, no white balance
+and no tuning file yet.
 
-## Where the numbers came from
+    cam -l
+      1: 'imx132' (/base/soc/cci@fda0c000/i2c-bus@1/camera@36)
 
-There is no register table for this part in any kernel, and the stock Android
-camera stack computes its writes at run time rather than holding one — see
-`../../docs/prior-art.md`. So every value in `imx132_mode_1976x1144` was read
-back from the sensor's own power-on defaults over CCI, and the driver's
-`imx132_configure()` writes them out again. That is closer to an assertion
-than a configuration, and it is written in full so that a second mode has
-something to differ from.
+    LIBCAMERA_SOFTISP_MODE=cpu cam -c 1 --capture=3 --file=/tmp/f-#.bin
+      configuring streams: (0) 1968x1144-ABGR8888/sRGB
+      3 frames, 9005568 bytes each
 
-Two independent reasons to trust them. The geometry matches Sony's own device
-tree for this phone exactly — `X_OUTPUT_SIZE` 1976 against Sony's
-`pixel_number_w = <1976>` — and the crop window is self-consistent:
-1975 - 0 + 1 = 1976, and 1171 - 28 + 1 = 1144. The full register dump is in
-`../../docs/camera.md`.
+Straight off `/dev/video0` the raw frames are 1976x1144 SBGGR10 packed, 2472
+bytes per line including two bytes of stride padding, and 74% of the bytes
+differ between consecutive frames — sensor noise, which is how you tell a live
+camera from a test pattern.
 
-The power sequence is Sony's, taken exactly from their published device tree:
-vdig, vio, vana, reset released, then the clock, with 1 ms between each and
-98 ms held down on the way out.
+## What it took, after the first attempt produced nothing
 
-## Why it does not stream yet
+The first attempt ended in `VFE sof timeout` with the CSIPHY interrupt count
+not moving. Three things were wrong, and only the first was obvious.
 
-The sensor accepts the streaming request — `0x0100` reads back 1 — and every
-geometry and exposure register the driver writes is confirmed in place. It
-simply does not drive the lanes.
-
-The cause is that the defaults are not a complete configuration, and the parts
-that are missing are not where an imx219 keeps them. **This part has no
+**The MIPI configuration is not where an imx219 keeps it.** This part has no
 `0x0114` lane mode, no `0x0128` D-PHY control and no `0x012a` input clock
-register**: writes to them are accepted and discarded, and reads come back
-zero. Proved by writing `0x0340` in the same way and reading the new value
-back, so it is those registers and not the write path.
+register: writes are accepted and discarded, reads come back zero. Proved by
+writing `0x0340` the same way and reading the new value back, so it was those
+registers and not the write path.
 
-Sony keeps them in the vendor range instead, and Intel's old atomisp driver
-publishes them — `0x3301` for the lane select and `0x3304`-`0x330e` for the
-D-PHY global timing, which is all zero at reset. Those, and about fifty
-analogue trim registers, are now in `imx132_vendor_init[]`. See
-`../../docs/prior-art.md`.
+**The D-PHY global timing is zero at reset.** Sony keeps it at
+`0x3304`-`0x330e` — TLPX, TCLK-PREPARE, TCLK-ZERO, TCLK-PRE, TCLK-POST,
+TCLK-TRAIL, THS-EXIT, THS-PREPARE, THS-ZERO, THS-TRAIL — along with the lane
+select at `0x3301` and about fifty analogue trim registers. Without them the
+sensor accepts a streaming request and never drives the lanes. The values come
+from Intel's old atomisp driver; `../../docs/prior-art.md` explains why that
+source was missed for so long.
 
-That did not produce frames either, and the run that would have shown whether
-the vendor block actually landed could not be read back: the sensor was
-already powered down by then, and the ISPIF had wedged — `ispif is busy: 0xe`
-— which a reboot clears. So the next session starts there:
+**The PLL has to match the timings.** With the vendor block in place it still
+did not stream, because the driver was using the sensor's own reset PLL —
+pre-divider 1, multiplier 45, a 216 MHz link — while Intel's D-PHY timings
+were derived for pre-divider 2 and multiplier 80, a 192 MHz link. D-PHY
+timings are only valid at the rate they were computed for. Switching the PLL
+to Intel's pair produced frames on the first try.
 
-1. Reboot, to clear the ISPIF.
-2. Confirm `0x3301` and `0x3304` read back non-zero while the driver holds the
-   sensor powered. If they do not, the vendor block is being written too early
-   or into a reset.
-3. If they do, the next suspect is the PLL. The driver keeps the sensor's
-   default multiplier of 45, giving a 216 MHz link; atomisp uses `0x0305 = 2`
-   and `0x0307 = 80`, giving 192 MHz, together with the D-PHY timings that
-   were computed for it. Adopting that pair means changing
-   `link-frequencies` in the device tree as well, so it needs a flash.
-4. Failing that, the lane mapping: clock on lane 1 with data on 0 and 2 is
-   inferred from Sony's `csi-lane-mask`, not confirmed.
+That the same numbers give 28.4 fps at 19.2 MHz, for a table Intel named
+`imx132_1080p_30fps`, is the reason to think their board fed it the same clock
+this phone does.
+
+## The GPU debayer does not work here
+
+libcamera's software ISP defaults to an EGL debayer on the GPU, and on this
+phone it fails every frame:
+
+    ERROR Debayer debayer_egl.cpp:669 debayerGPU failed
+
+The CPU path works. `/etc/environment.d/90-libcamera-softisp.conf` sets
+`LIBCAMERA_SOFTISP_MODE=cpu` so that applications get it without having to
+know. This is the same Adreno 330 that needs `/etc/sirius-renderer` set to
+cairo rather than gl, so it may be the same underlying problem.
+
+## Not done
+
+- **Phosh's camera app has not been tried**, only `cam`. The phone was at the
+  greeter with no graphical session when the sensor started working.
+- **No auto-exposure or white balance.** libcamera has no tuning file for this
+  sensor and falls back to `uncalibrated.yaml`, and it warns that there is no
+  entry for `imx132` in its sensor properties database. Both are worth
+  contributing.
+- libcamera also warns that a recommended V4L2 control is missing and that the
+  camera location and rotation are not advertised. The location comes from a
+  `location` property in the device tree; the rotation from
+  `V4L2_CID_CAMERA_ORIENTATION` and `V4L2_CID_CAMERA_SENSOR_ROTATION`, which
+  the driver should add.
 
 ## Things that are guesses, and how to check them
 
 - **Analogue gain.** The reciprocal law `gain = 256 / (256 - value)` is Sony's
   usual one and the register is in the usual place, but the maximum is a
   guess. Sweep it against a fixed scene once frames arrive.
-- **The clock rate.** The driver requires 19.2 MHz because that is what the
-  board supplies and what the sensor was read at. Sony's own driver sets
-  8 MHz. Both cannot be right about what Sony shipped, and the PLL maths
-  below depends on which it is.
-- **Link frequency**, 216 MHz, is `19.2 MHz x 45 / 10` for the pixel clock and
-  then `x 10 bits / 2 lanes / 2` for DDR. If the sensor is actually driven at
-  8 MHz this is wrong by a factor of 2.4.
-- **Lane mapping.** Clock on lane 1 with data on 0 and 2 reproduces Sony's
-  `csi-lane-mask = <0x7>`, and the rear camera's `0x1f` is the same layout
-  with four data lanes. Consistent, but not confirmed by a working link.
-- **Bayer order.** Sony's `subdev_code = 0x3007` is `SBGGR10`, so that is the
-  no-flip order, and the flip table follows from it. A wrong guess here shows
-  up as swapped colours, not as a failure.
+- **The clock rate**, 19.2 MHz, is settled: the board supplies it, the sensor
+  was read at it, and Intel's PLL values give the frame rate their table is
+  named for. Sony's own driver sets 8 MHz, which remains unexplained but is
+  evidently not what this hardware needs.
+- **Lane mapping** is confirmed by a working link: clock on lane 1 with data on
+  0 and 2, which is what Sony's `csi-lane-mask = <0x7>` describes.
+- **Bayer order.** `SBGGR10` from Sony's `subdev_code = 0x3007`. The image
+  comes out with plausible colour, so it is at worst close; a wrong guess here
+  shows up as swapped colours rather than as a failure.
 
 ## The image to flash
 

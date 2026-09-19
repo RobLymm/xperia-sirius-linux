@@ -99,14 +99,24 @@
 #define IMX132_XCLK_FREQ		19200000
 
 /*
+ * PLL. The sensor's own reset values are pre_pll_clk_div 1 and multiplier 45,
+ * but the D-PHY global timing in imx132_vendor_init[] was computed by Intel
+ * for 2 and 80, and D-PHY timings are only valid at the rate they were
+ * derived for. Use their pair, so that the timings and the link agree.
+ *
  * vt_pix_clk = xclk / pre_pll_clk_div * pll_multiplier
  *		      / (vt_pix_clk_div * vt_sys_clk_div)
- *	      = 19.2 MHz / 1 * 45 / (10 * 1)
+ *	      = 19.2 MHz / 2 * 80 / (10 * 1)
+ *
+ * which gives 76.8e6 / (2250 * 1200) = 28.4 fps, for a vendor table named
+ * 1080p_30fps -- reason to think Intel's board also fed it 19.2 MHz.
  */
-#define IMX132_PIXEL_RATE		86400000
+#define IMX132_PRE_PLL_CLK_DIV		2
+#define IMX132_PLL_MULTIPLIER		80
+#define IMX132_PIXEL_RATE		76800000
 
 /* pixel_rate * bits_per_sample / lanes / 2, for DDR */
-#define IMX132_LINK_FREQ		216000000
+#define IMX132_LINK_FREQ		192000000
 
 #define IMX132_NATIVE_WIDTH		1976
 #define IMX132_NATIVE_HEIGHT		1200
@@ -559,8 +569,9 @@ static int imx132_configure(struct imx132 *imx132)
 	cci_write(map, IMX132_REG_CSI_DATA_FORMAT,
 		  IMX132_CSI_DATA_FORMAT_RAW10, &ret);
 
-	cci_write(map, IMX132_REG_PRE_PLL_CLK_DIV, 1, &ret);
-	cci_write(map, IMX132_REG_PLL_MULTIPLIER, 45, &ret);
+	cci_write(map, IMX132_REG_PRE_PLL_CLK_DIV, IMX132_PRE_PLL_CLK_DIV,
+		  &ret);
+	cci_write(map, IMX132_REG_PLL_MULTIPLIER, IMX132_PLL_MULTIPLIER, &ret);
 	cci_write(map, IMX132_REG_VT_PIX_CLK_DIV, 10, &ret);
 	cci_write(map, IMX132_REG_VT_SYS_CLK_DIV, 1, &ret);
 
@@ -767,13 +778,17 @@ static int imx132_check_hwcfg(struct device *dev)
 		goto done;
 	}
 
-	if (ep_cfg.nr_of_link_frequencies != 1 ||
-	    ep_cfg.link_frequencies[0] != IMX132_LINK_FREQ) {
-		ret = dev_err_probe(dev, -EINVAL,
-				    "link frequency must be %d\n",
-				    IMX132_LINK_FREQ);
-		goto done;
-	}
+	/*
+	 * The driver reports its real link frequency through
+	 * V4L2_CID_LINK_FREQ, which is what the receiver uses; a disagreeing
+	 * device tree is worth saying so about but not worth refusing over.
+	 */
+	if (ep_cfg.nr_of_link_frequencies != 1)
+		dev_warn(dev, "expected one link frequency, got %u\n",
+			 ep_cfg.nr_of_link_frequencies);
+	else if (ep_cfg.link_frequencies[0] != IMX132_LINK_FREQ)
+		dev_warn(dev, "device tree says %llu Hz, driver runs %d Hz\n",
+			 ep_cfg.link_frequencies[0], IMX132_LINK_FREQ);
 
 	ret = 0;
 

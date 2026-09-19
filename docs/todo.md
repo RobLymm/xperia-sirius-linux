@@ -74,8 +74,8 @@ reboot, so autoconnect works.
 
 ## 3. Camera
 
-Staged in `camera-plan.md`. Three stages are done, and the gate has moved
-from the kernel to the sensor data.
+Staged in `camera-plan.md`. Four stages are done and the front camera takes
+pictures. What is left is the rear sensor, and tuning.
 
 - [x] **Stage 1** — the media core. It needed no kernel rebuild and no flash:
       every part of the media stack is tristate, and `DMA_SHARED_BUFFER`,
@@ -93,19 +93,26 @@ from the kernel to the sensor data.
       Two bugs surfaced only by running it, both recorded in that README: an
       unreachable VFE clock rate, and a `switch` on SoC version in
       `vfe_src_pad_code` that a grep for `==` does not find.
-- [ ] **Stage 4** — IMX132 front sensor. **Driver written, compiles, loads,
-      never bound.** `../drivers/camera/imx132.c` and `sensor-nodes.dtsi`.
-      **Flash `images/boot-imx132-v1.img`** — the running image plus the
-      sensor node, the camss `port@2` endpoint and `vdda-supply`, 606 nodes
-      and 6 differences, both `strings` checks pass, backup at
-      `images/boot-backup-before-imx132.img`. Then `sudo modprobe imx132` and
-      read dmesg: the first question is whether probe reads the chip ID back,
-      which exercises the power sequence, the clock and the bus together.
-      That directory's README lists what in the driver is measured and what
-      is still a guess.
+- [x] **Stage 4** — IMX132 front sensor. **Working.** Captures 1976x1144
+      SBGGR10, and libcamera lists the camera and produces correct colour
+      images through its software ISP. `../drivers/camera/imx132.c`.
+      Three things had to be right before anything streamed, all recorded in
+      that directory's README: the MIPI registers are in Sony's vendor range
+      and not where an imx219 keeps them, the D-PHY global timing is zero at
+      reset, and the PLL has to match the rate those timings were derived for.
 - [ ] **Stage 5** — IMX200 rear sensor, plus the BU64296G autofocus actuator
       and the flash. Same method as the front, larger: 20.7 MP over four
-      lanes.
+      lanes. **Harder than the front was**, because no equivalent of Intel's
+      atomisp tables has been found for this part, and the vendor MIPI
+      registers cannot be read out of a sensor that is not streaming. Start by
+      looking for an IMX200 or IMX220 table anywhere at all.
+- [ ] **Stage 6** — the camera app. libcamera already works; what is missing
+      is auto-exposure, white balance and a tuning file. `cam` gets flat,
+      slightly green images because libcamera falls back to
+      `uncalibrated.yaml` and has no `imx132` entry in its sensor properties
+      database — both worth contributing upstream. **Phosh's camera app has
+      not been tried**: the phone was at the greeter when the sensor started
+      working. Unlock it and run Snapshot.
 
 **Done when** a still is captured from each camera and a video is recorded
 from the rear one.
