@@ -1838,8 +1838,24 @@ static struct max1187x_pdata *max1187x_get_platdata_dt(struct device *dev)
 	/* Parse gpio_tirq */
 	pdata->gpio_tirq = of_get_named_gpio(devnode, "tirq-gpio", 0);
 
-	pdata->gpio_reset = of_get_named_gpio(devnode, "reset-gpio", 1);
-	
+	/*
+	 * Index 0, not 1. reset-gpio holds a single GPIO specifier, so index 1
+	 * returns -ENOENT, and gpio_reset is a u32, which turns that into a
+	 * large positive number. Every "if (pdata->gpio_reset)" guard then
+	 * passes and every operation on the line fails:
+	 *
+	 *   max1187x 0-0048: GPIO request failed for gpio reset (-2)
+	 *
+	 * Probe continues, because max1187x_gpio_init() only warns, so touch
+	 * works while the phone is awake. But reset_power() does nothing
+	 * except toggle this line, and enable_resume_por is set in the device
+	 * tree, so resume calls a reset that cannot happen and the controller
+	 * stays in the sleep mode suspend put it in. Sony's original read the
+	 * line as a plain u32 "gpio_reset" property; this port moved to a
+	 * normal GPIO specifier and took the wrong index with it.
+	 */
+	pdata->gpio_reset = of_get_named_gpio(devnode, "reset-gpio", 0);
+
 	/* Parse reset_l2h (Low to Hi) */
 	if (of_property_read_u32(devnode, "reset_l2h", &pdata->reset_l2h))
 		dev_info(dev, "unused reset_l2h should be set to zero\n");
