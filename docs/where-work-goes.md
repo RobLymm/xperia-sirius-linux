@@ -26,20 +26,21 @@ To find out what is actually running:
 does not round-trip into a bootable tree. Use `/sys/firmware/fdt`, which is
 the blob itself, or the DTB inside an image known to boot.
 
-A worked example, 2026-09-19. Comparing the image the phone was flashed with
-against its own live tree:
-
-    tools/dt-equiv.py images/boot-voice-v1.img live.dtb
-    601 nodes compared, 0 differences
-
-and a candidate carrying deliberate camera changes against the same tree:
+A worked example, 2026-09-19, after the camera tree was flashed. Against the
+phone's own live tree:
 
     tools/dt-equiv.py images/boot-cam-v2.img live.dtb
+    604 nodes compared, 0 differences
+
+    tools/dt-equiv.py images/boot-voice-v1.img live.dtb
     601 nodes compared, 8 differences
 
-all eight being the intended ones. Equal node counts are the quick tell that
-nothing was dropped: the images that cost the evening below were built on a
-tree with fewer nodes, and this check would have said so in a second.
+The first names what the phone is running. The second is the image it ran
+before, and its eight differences are the camera changes — the `cci` node's
+status, clocks and clock-names, and the always-on regulators. Node counts are
+the quick tell that nothing was dropped: the images that cost the evening
+below were built on a tree with fewer nodes, and this check would have said so
+in a second.
 
 ## Which document holds which kind of fact
 
@@ -108,12 +109,13 @@ is old, check the phone before believing it.
 Checked on the device on 2026-09-19. The phone works; a phone built only from
 what is packaged here would not, and these are the reasons.
 
-**Twenty-two of the modules the phone has loaded are hand-built**, from
+**Thirty-three of the modules the phone has loaded are hand-built**, from
 `/lib/modules/6.16.12/updates`, not from the kernel package: the whole QDSP6
 audio stack, the WCD9320 codec, the SLIMbus NGD controller, the PM8941 clock
-divider, the q6voice set, the panel driver, the battery pair and the
-touchscreen. Display, touch, battery and audio therefore currently depend on
-modules nobody else can obtain by installing packages.
+divider, the q6voice set, the panel driver, the battery pair, the touchscreen,
+the CCI controller and the eleven V4L2 media core modules. Display, touch,
+battery, audio and the camera bus therefore currently depend on modules nobody
+else can obtain by installing packages.
 
 - **The touch driver is in `drivers/touch/` but not in the kernel package.**
   Published on 2026-09-19; until then it existed only on the test phone.
@@ -149,23 +151,22 @@ modules nobody else can obtain by installing packages.
   far was flashed by hand, which is why `docs/from-stock-to-this.md` still
   starts by installing postmarketOS as an Xperia Z3 and layering the Z2 on top.
 
-**Camera: the control bus works.** With `cci@fda0c000` enabled and the two
-camera master clocks hung off it, both CCI masters come up as ordinary i2c
-adapters, mainline's `i2c-qcom-cci` binds to `qcom,msm8974-cci`, its
-interrupt fires on every transfer, and the clocks run at 19.2 MHz. The module
-is hand-built and installed at `/lib/modules/6.16.12/updates/cci/`; it is not
-loaded at the moment only because the phone was reverted to a tree in which
-the node is disabled.
+**Camera: the control bus and the media core work, and neither is packaged.**
+The phone runs `images/boot-cam-v2.img` — confirmed against `/sys/firmware/fdt`,
+604 nodes, 0 differences — so `cci@fda0c000` is enabled and both sensors
+answer. `i2c-qcom-cci` is hand-built in `/lib/modules/6.16.12/updates/cci/`,
+and the eleven V4L2 media core modules are hand-built in
+`/lib/modules/6.16.12/updates/media/`. Nothing in the kernel package builds
+either, and the board file in this repository does not yet carry the camera
+device tree changes that image has.
 
-The sensors do not answer yet. Three of the four rails were on; `lvs2`, the
-`vio` supply that powers the sensors' I/O and therefore their I2C, was not,
-and that is the next thing to test. Two details worth not rediscovering:
-`i2cdetect` is useless on these parts, because it probes with a one-byte read
-while they use 16-bit register addressing, and an absent sensor shows as
-`master 0 queue 0 timeout` rather than a NAK.
-
-See `known-problems.md` for the evening this cost, and the rule at the top of
-this page for how to avoid repeating it.
+`handover-camera.md` holds the state and the reproduction steps, and
+`camera.md` the hardware. The one thing worth repeating here, because it is
+not camera-specific: **out-of-tree modules for this phone need a
+`Module.symvers` that the kernel tree does not have**, and
+`tools/harvest-symvers.py` plus `tools/fill-symvers.sh` build one from the
+running kernel's own CRCs. Any module work on this device needs them, not
+just the camera.
 
 ## Naming
 

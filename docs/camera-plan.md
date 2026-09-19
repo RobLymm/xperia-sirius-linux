@@ -16,7 +16,9 @@ which say IMX220, are wrong for this device. Front: a Sony **IMX132**
 (`LGI02BN1_IMX132.dat`, `SEM02BN1_IMX132.dat`, 2 MP, two module suppliers),
 fixed focus. Neither part has a mainline Linux driver (IMX132 exists only in
 the unusable `staging/media/atomisp`); `imx258`/`imx283` are the closest
-templates and register sequences come from Sony's downstream CAF driver.
+templates. **Register sequences are not in any kernel, Sony's included** — in
+this generation of Qualcomm camera software they lived in the userspace HAL.
+See `prior-art.md`.
 
 **Wiring**, from Sony's stock device tree:
 
@@ -53,31 +55,40 @@ old patch cannot be applied; its content has to be re-expressed. camss still
 depends on `IOMMU_DMA` and uses `videobuf2-dma-sg`, which is exactly what the
 Nexus 5 patch had to change, because msm8974's camera subsystem has no IOMMU.
 
-## Stage 1 — kernel configuration
+## Stage 1 — the media core — done, 2026-09-19
 
-Needs a kernel rebuild; everything else depends on it.
+**This did not need a kernel rebuild, and it did not need a flash.** The whole
+media stack is tristate, and everything it needs built in — `DMA_SHARED_BUFFER`,
+`CMA`, `DMA_CMA` — the running kernel already has, because the GPU carveout put
+them there. So it builds as ordinary out-of-tree modules against the kernel the
+phone is running.
 
-    CONFIG_MEDIA_SUPPORT=m
-    CONFIG_MEDIA_CAMERA_SUPPORT=y
-    CONFIG_MEDIA_PLATFORM_SUPPORT=y
-    CONFIG_VIDEO_DEV=m
-    CONFIG_V4L2_FWNODE=m
-    CONFIG_VIDEO_QCOM_CAMSS=m      (after stage 3's Kconfig change)
-    CONFIG_I2C_QCOM_CCI=m
-    CONFIG_VIDEOBUF2_DMA_CONTIG=m  (stage 3 selects it; msm8974 has no camera IOMMU)
+Enabling it changes nothing inside `vmlinux`. Against the phone's own config
+the diff is five new modules —
 
-Config audit of the aport (2026-09-13, `config-postmarketos-qcom-msm8974.armv7`):
-none of the above are set yet — `MEDIA_SUPPORT` and `I2C_QCOM_CCI` are
-explicitly "not set", the rest absent. This is the **only** kernel-config work
-the next stages need: NFC (`NFC_NXP_NCI`/`NFC_NCI`/`NFC_PN544`) and SLIMbus
-(`SLIMBUS`, `SLIM_QCOM_NGD_CTRL`) are **already `=m` in the config**, so NFC and
-the future WCD9320 audio path need no config change — only device tree (NFC) or
-a codec driver (audio). So one media-stack addition to the next kernel build
-unblocks the camera; fold it in with any other pending kernel change.
+    CONFIG_MEDIA_SUPPORT=m  CONFIG_VIDEO_DEV=m  CONFIG_V4L2_FWNODE=m
+    CONFIG_V4L2_ASYNC=m     CONFIG_I2C_QCOM_CCI=m
 
-**Done when** `/dev/media0` can exist, i.e. the media core loads.
+— and eleven new `=y` symbols, every one of them either a Kconfig menu switch
+or a compile-time option *inside* the media modules themselves
+(`MEDIA_CONTROLLER`, `VIDEO_V4L2_SUBDEV_API`, `VIDEO_V4L2_I2C`). Nothing is
+removed. Set `CONFIG_MEDIA_SUPPORT_FILTER=y` or the DVB, analogue TV, radio and
+SDR trees come with it.
 
-## Stage 2 — CCI bus and sensor identification
+Built and loaded on the phone: `mc`, `videodev`, `v4l2-async`, `v4l2-fwnode`,
+`v4l2-dv-timings`, and the six `videobuf2-*` modules, in
+`/lib/modules/6.16.12/updates/media/`. The kernel reports
+
+    mc: Linux media interface: v0.10
+    videodev: Linux video capture interface: v2.00
+
+`handover-camera.md` has the build commands and the Module.symvers tooling they
+need.
+
+**Done:** the media core loads. There is still no `/dev/video*`, because no
+driver registers one — that is stage 3.
+
+## Stage 2 — CCI bus and sensor identification — done, 2026-09-19
 
 Device tree only, no driver work:
 
@@ -89,9 +100,9 @@ Device tree only, no driver work:
 Then power the rails, release reset, and read the sensor ID registers and the
 two EEPROMs with `i2ctransfer` on the CCI buses.
 
-**Done when** both chip IDs read back: the front IMX132, and the rear part,
-which the read decides between IMX200 and IMX220 (or corrects entirely). Save
-the EEPROM contents.
+**Done:** both chip IDs read back, rear IMX200 and front IMX132, and both
+EEPROMs were read. `handover-camera.md` has the commands and the four traps.
+The phone runs `images/boot-cam-v2.img`, which carries this tree.
 
 ## Stage 3 — CAMSS for msm8974
 
@@ -126,11 +137,11 @@ quickest end-to-end proof.
 **Done when** `v4l2-ctl --stream-mmap` captures valid Bayer frames from the
 front camera.
 
-## Stage 5 — rear sensor driver (IMX200/IMX220)
+## Stage 5 — rear sensor driver (IMX200)
 
 Same method, larger: 20 MP, four lanes, plus the autofocus voice-coil actuator
-on L23 (its own small I2C driver, part to be identified from Sony's tree) and
-the flash LED. EEPROM calibration data (lens shading, AF) from stage 2.
+on L23 — a Rohm BU64296G, a small I2C driver of its own — and the flash LED.
+EEPROM calibration data (lens shading, AF) from stage 2.
 
 **Done when** rear frames capture, focus can be driven, and the flash fires.
 
@@ -144,12 +155,10 @@ then Snapshot or Megapixels on Phosh.
 
 ## Order and dependencies
 
-    1 kernel config ──► 2 CCI + identify ──► 4 front sensor ──┐
-                    └─► 3 CAMSS ────────────────────────────┴─► 6 userspace
-                                         5 rear sensor ─────┘
+    1 media core ──► 2 CCI + identify ──► 4 front sensor ──┐
+                  └─► 3 CAMSS ──────────────────────────┴─► 6 userspace
+                                     5 rear sensor ─────┘
 
-Stages 2 and 3 can proceed in parallel after stage 1. Stage 4 needs both.
-Stage 5 reuses everything from 4.
-
-The single blocker today is stage 1: this device's kernel is built with no
-media support at all.
+Stages 1 and 2 are done. **Stage 3 is now the blocker**: nothing downstream
+can be tested until camss registers a `/dev/video*` for a sensor driver to
+feed and for libcamera to open.

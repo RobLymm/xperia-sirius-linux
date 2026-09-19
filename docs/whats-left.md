@@ -42,16 +42,23 @@ to be the s2idle resume path, so it may fall out of the suspend work. Days.
 
 ## Blocking for some people, not for all
 
-**Camera.** Does not work at all, and is the largest single piece of work
-here. The CCI control bus is in the booted device tree but disabled, and
-neither `I2C_QCOM_CCI` nor `MEDIA_SUPPORT` is built, so there is no camera
-stack to talk to. Getting as far as reading the sensors' chip IDs — which
-would settle whether the rear part is an IMX200 or an IMX220 — needs a kernel
-rebuild and a flash, because this kernel has no runtime device tree overlay
-support either. Beyond that, msm8974 CAMSS support exists only as a 5.17-era
-out-of-tree patch that has to be re-expressed for 6.16, and neither sensor
-has a driver anywhere. Weeks, and two new sensor drivers.
-See `camera-plan.md`.
+**Camera.** Still the largest single piece of work here, but two of its six
+stages are done and neither of them turned out to be the expensive part. The
+control bus works and both sensors identify themselves from the silicon; the
+V4L2 media core is built and loaded, and that needed no kernel rebuild and no
+flash, because every part of the media stack is a module and the three things
+it needs built in were already there for the GPU.
+
+What is left is genuinely hard, in two unequal pieces. **The ISP is days**:
+msm8974 CAMSS exists only as a 5.17-era out-of-tree patch that has to be
+re-expressed for 6.16, but every address, interrupt and clock it needs is
+known and confirmed from three independent sources, and the mainline
+`mmcc-msm8974` driver already has every clock. **The two sensor drivers are
+weeks**, and the reason is narrower than "no driver exists": the power
+sequences are published by Sony exactly, but the register and mode tables are
+not in any kernel, Sony's included — in this generation they lived in the
+userspace camera HAL — so they have to be recovered from the stock system
+partition. See `camera-plan.md`.
 
 **NFC.** Not working, and not merely untested: there is no NFC node in the
 booted device tree and no driver loaded. The mainline driver supports the
@@ -101,10 +108,11 @@ each would take.
 
 **The camera parts are identified and driverless.** Rear **IMX200**, front
 **IMX132**, autofocus a Rohm **BU64296G**, all three answering on the CCI
-bus, none with a driver. The IMX200 has no driver anywhere and has to be
-written from Sony's downstream register sequences; the IMX132 exists only in
-the Intel-coupled `staging/atomisp`, which is not usable here. The actuator
-is a simple I2C part and the smallest of the three.
+bus, none with a driver. The IMX200 has no driver anywhere; the IMX132 exists
+only in the Intel-coupled `staging/atomisp`, which is not usable here. Sony's
+published kernel gives both power sequences exactly but no register or mode
+tables, so those have to come off the stock system partition. The actuator is
+a simple I2C part and the smallest of the three.
 
 **Proximity's near threshold is a guess.** It is set to 250 against a far
 reading of 93-122, which is clear of the noise but has never been checked

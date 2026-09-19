@@ -85,22 +85,42 @@ project has used the stock firmware *on the device* — decompiled device
 trees, tuning files, blobs — but not Sony's published source, and that is a
 gap rather than a decision.
 
-It is the most authoritative source available for several things still
-unwritten here:
+It was read on 2026-09-19. What it does and does not contain is now known,
+and the answer for the cameras is half of what this page used to claim.
 
-- **The camera sensors.** `drivers/media/platform/msm/camera_v2/sensor/` in
-  that kernel is where the IMX200 and IMX132 power-up and register sequences
-  live. No IMX200 driver exists anywhere in mainline, so this is the only
-  real starting point, and writing one without it means reverse-engineering
-  what Sony already published.
-- **The autofocus actuator**, a Rohm BU64296G, in the same tree's actuator
-  directory.
+**The camera sensors: power sequences yes, register sequences no.** The Z2's
+camera driver is `sony_camera_v4l2.c`, and it is on branch
+`aosp/LNX.LA.3.5.1-01110-8x74.0` — not on the newest 8x74 branch, which drops
+it. It is a power-sequencing and I2C-passthrough driver: rails, GPIOs, clock,
+one `I2C_WRITE` for streaming off, and nothing else. Its
+`struct sony_camera_seq` has exactly nine commands, none of which programs a
+mode. The generic Qualcomm sensor drivers in the same tree are no different —
+`imx135.c` is 236 lines and is all power sequencing.
+
+That is how this generation of Qualcomm camera software worked: sensor mode
+programming lived in the userspace HAL, which sent register arrays down
+through ioctls. **No Qualcomm-era kernel contains IMX200 or IMX132 mode
+tables, and Sony's does not either.** They have to come from the stock camera
+HAL on the device; see `extracting-from-stock.md`.
+
+What the published source *is* authoritative for, and what was taken from it:
+
+- **The camera power sequences**, exactly: rail order, voltages, load
+  currents and per-step delays for both sensors, in
+  `arch/arm/boot/dts/msm8974pro-ab-shinano_sirius_common.dtsi`. In
+  `camera.md`.
+- **The ISP hardware map** — CSIPHY, CSID, ISPIF, VFE addresses, sizes and
+  interrupt numbers, in `msm8974-camera.dtsi`. It agrees exactly with the
+  table already derived from the stock device tree on the device, which makes
+  three independent derivations.
+- **The autofocus actuator**, a Rohm BU64296G, in the actuator directory.
 - **The touchscreen.** The MAX1187x driver this port runs came from Sony
   downstream; the published source is its origin.
-- **The WCD9320 codec and the msm8974 CAMSS**, for comparison against the
-  forward-ports here.
+- **The WCD9320 codec**, for comparison against the forward-port here.
 
-Worth checking before writing any new driver for this phone.
+Worth checking before writing any new driver for this phone — and worth
+checking *which branch*, because the sirius-specific files are not all on the
+newest one.
 
 ## Where this project is ahead
 

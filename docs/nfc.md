@@ -97,6 +97,14 @@ and the NCI core. Check with `zcat /proc/config.gz | grep NXP_NCI` before
 building a device tree, because if they are not set the node will bind to
 nothing and look like a hardware failure.
 
+**They are already `=m` in this kernel's config**, as are `SLIMBUS` and
+`SLIM_QCOM_NGD_CTRL`, so no kernel rebuild is needed for either — only the
+device tree node. And even a driver that is *not* configured can be added
+without touching `vmlinux`, as long as it is tristate: build it out of tree
+against the running kernel the way the media core was, with
+`tools/kbuild-mod.sh`. See `handover-camera.md` for the method and the
+`Module.symvers` tooling it needs.
+
 After flashing:
 
     i2cdetect -y -r 5              # bus number varies; find blsp1_i2c6 first

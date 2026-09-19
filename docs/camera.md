@@ -72,11 +72,69 @@ What else is on the two buses, from the same scan:
 No mainline driver exists for IMX200, IMX220, IMX132 or IMX135 (IMX132 appears
 only in the old `staging/media/atomisp`, Intel-coupled and unusable here). The
 nearest prior art is the IMX300 driver written by reverse-engineering Sony
-Xperia userspace, and the msm8996 IMX318 "first photo" write-up. Register and
-power sequences come from Sony's downstream CAF Android sensor driver
-(`drivers/media/platform/msm/camera_v2/sensor/…`), with `imx258` or the 2024
-20 MP `imx283` as the closest structural templates. Sony's device tree itself
-only says `sony_camera_0` / `sony_camera_1`; each module has an EEPROM at 0xa0.
+Xperia userspace, and the msm8996 IMX318 "first photo" write-up, with `imx258`
+or the 2024 20 MP `imx283` as the closest structural templates.
+
+## What Sony's published source gives, and what it does not
+
+Read on 2026-09-19 from `sonyxperiadev/kernel`. The driver is
+`sony_camera_v4l2.c` on branch `aosp/LNX.LA.3.5.1-01110-8x74.0` — **not** on
+the newest 8x74 branch, which drops it — and the board data is
+`arch/arm/boot/dts/msm8974pro-ab-shinano_sirius_common.dtsi`.
+
+**There are no register or mode tables in it, and there are none in any
+Qualcomm-era kernel.** `sony_camera_v4l2.c` is power sequencing and I2C
+passthrough: nine commands, of which the only register write is streaming off.
+The generic CAF drivers are the same — `imx135.c` is 236 lines of power
+sequencing. Mode programming lived in the userspace HAL, so the IMX200 and
+IMX132 mode tables have to come from the stock camera blobs
+(`extracting-from-stock.md`), not from source. `prior-art.md` has the
+correction in full.
+
+What it *is* authoritative for, taken verbatim:
+
+| | rear `sony_camera_0` | front `sony_camera_1` |
+|---|---|---|
+| fitted module | `SOI20BS0` | `SEM02BN1` (or `LGI02BN1`) |
+| active pixels | 5248 × 3936 | 1976 × 1200 |
+| unit cell | 1.20 µm | 1.12 µm |
+| aperture | f/2.0 | f/2.8 |
+| image circle | 7.87 mm | 2.59 mm |
+| media bus code | `subdev_code = 0x3007`, i.e. `MEDIA_BUS_FMT_SBGGR10_1X10` | same |
+| CSI lane mask | 0x1f — 4 data lanes + clock | 0x07 — 2 data + clock |
+| lane assignment | 0x4320 | 0x4320 |
+| PLL table | 18 entries, `600 318 386 684 318 578 293 388 597 599 318 596 599 474 599 825 578 578` | 18 entries, all 104 except entry 8 = 101 |
+
+Both module part numbers match the EEPROM strings already read off the device,
+so Sony's tree describes this exact handset.
+
+**MCLK is 8 MHz.** Both sensors' power-on step is `CAM_CLK = <6 0 0 N>`, and
+value 0 means `SENSOR_MCLK_DEFAULT` in `sony_camera_v4l2.c`, which is
+8,000,000. That is not the 19.2 MHz the CCI node currently supplies, nor the
+24 MHz of Qualcomm reference designs; the PLL tables above multiply up from
+it. Untested here — the sensors answer I2C at the current rate, but nothing
+has streamed.
+
+**Power-on, rear**, in order, each with its delay in ms:
+
+    CAM_VDIG  1.2 V   85 mA     wait 1
+    CAM_VIO   (LVS2, no voltage) wait 1
+    CAM_VANA  2.7 V  103 mA     wait 1
+    CAM_VAF   2.8 V  106.5 mA   wait 1
+    GPIO_RESET high             wait 1
+    CAM_CLK   8 MHz             wait 10
+
+**Power-off, rear**: write 0 to register **0x0100** and wait 100 ms, then
+reset low, clock off, then VDIG, VIO, VANA, and VAF last with a 99 ms delay
+after it.
+
+**Power-on, front**: the same but with no VAF, and the final clock wait is 1 ms
+rather than 10. **Power-off, front** drops the rails in the opposite order —
+VANA, VIO, VDIG — with a 98 ms delay after VDIG.
+
+That 0x0100 is the standard Sony/SMIA streaming-control register, which is
+worth knowing given the rear sensor reads zero across the SMIA identity block:
+the identity registers are non-standard, the streaming register is not.
 
 ## What already exists
 
@@ -184,19 +242,57 @@ Model everything on the msm8916 tables (`csiphy_res_8x16`, `csid_res_8x16`,
   `version`, `pd_name`, the four `*_res` tables, and the counts
   **`csiphy_num = 3`, `csid_num = 4`, `vfe_num = 2`** (ISPIF is a single
   struct, not counted). Add `qcom,msm8974-camss` to the of_match `.data`.
-- `version`: reuse **`CAMSS_8x16`** (VFE 4.1, the `vfe_ops_4_1` path z3ntu
-  used) rather than a new enum, but three behaviours are keyed on version and
-  need checking against msm8974: (1) the **ISPIF interrupt handler** — z3ntu
-  switched to `ispif_isr_8x96`; (2) **dual VFE** — 8x16 ships `vfe_num = 1`, so
-  the two-VFE path (present for 8x96) must be exercised with `vfe_num = 2`;
-  (3) **CSIPHY type** — msm8974 uses the older 2-phase CSIPHY like 8x16
-  (`camss-csiphy-2ph-1-0.c`), not the 3-phase one. If 8x16's version gates any
-  of these wrong for two VFEs, a `CAMSS_8x74` enum is the fallback.
-- Carry z3ntu's no-IOMMU change in `camss-video.c`
-  (`vb2_dma_contig_*` instead of `vb2_dma_sg_*`) — msm8974 has no camera IOMMU.
+- `version`: **a new `CAMSS_8x74` is required, not optional.** This page used
+  to call it a fallback behind reusing `CAMSS_8x16`; reading every site that
+  branches on version shows msm8974 falls on different sides at different
+  ones, so no existing value fits:
 
-This needs a media-configured kernel build to compile and hardware to test the
-ISPIF/dual-VFE paths, so it is a build-and-iterate job, not a blind patch.
+  | site | what it decides | msm8974 groups with |
+  |---|---|---|
+  | `camss.c` ~3587 | whether to allocate an ISPIF | 8x16/8x53/8x96 — it has one |
+  | `camss-csiphy.c` ~607 | whether to map the CSIPHY `clk_mux` register | 8x16/8x53/8x96 — Sony's tree has it at fda00030/38/40 |
+  | `camss-csid.c` ~635 | CSID source-pad format: 8x16 passes the sink code through, later parts remap | **8x16** — CSID 4.1 |
+  | `camss-ispif.c` ~832, ~1113, ~1131, ~1165 | ISPIF register layout and interrupt handler | **8x96** — msm8974 is `ispif-v3.0` |
+
+  Reusing `CAMSS_8x16` gives the wrong ISPIF handler; reusing `CAMSS_8x96`
+  gives the wrong CSID format path. Add `CAMSS_8x74` to each of those
+  conditions on the correct side.
+- **CSIPHY type**: msm8974 uses the older 2-phase CSIPHY like 8x16
+  (`camss-csiphy-2ph-1-0.c`), not the 3-phase one.
+- **Dual VFE**: 8x16 ships `vfe_num = 1`, so the two-VFE path — exercised on
+  8x96 — is new ground with `vfe_num = 2`.
+- Carry z3ntu's no-IOMMU change in `camss-video.c`: `q->mem_ops =
+  &vb2_dma_contig_memops` at ~717 and `vb2_dma_contig_plane_dma_addr()` in
+  place of the `vb2_dma_sg_plane_desc()` scatter-gather walk at ~158. Also
+  drop `depends on (ARCH_QCOM && IOMMU_DMA)` from `Kconfig` and select
+  `VIDEOBUF2_DMA_CONTIG` instead of `VIDEOBUF2_DMA_SG`. **That dependency is
+  why camss does not even appear in menuconfig today**: msm8974 sets neither
+  `ARM_SMMU` nor `QCOM_IOMMU`, so `IOMMU_DMA` is off.
+
+**Clocks: every one msm8974 needs is already in mainline's `mmcc-msm8974`**,
+which removes the largest unknown. Mapping from the camss driver's clock names
+to `dt-bindings/clock/qcom,mmcc-msm8974.h`:
+
+| camss clock name | msm8974 binding |
+|---|---|
+| `top_ahb` | `CAMSS_TOP_AHB_CLK` |
+| `ispif_ahb` | `CAMSS_ISPIF_AHB_CLK` |
+| `csiphy0_timer` … `csiphy2_timer` | `CAMSS_PHY0_CSI0PHYTIMER_CLK` … `PHY2_CSI2PHYTIMER` |
+| `csi0` … `csi3` | `CAMSS_CSI0_CLK` … `CSI3` |
+| `csi0_ahb`, `csi0_phy`, `csi0_pix`, `csi0_rdi` | `CAMSS_CSI0_AHB_CLK`, `CSI0PHY`, `CSI0PIX`, `CSI0RDI` (×4) |
+| `vfe0`, `vfe1` | `CAMSS_VFE_VFE0_CLK`, `VFE1` |
+| `csi_vfe0`, `csi_vfe1` | `CAMSS_CSI_VFE0_CLK`, `VFE1` |
+| `vfe_ahb`, `vfe_axi` | `CAMSS_VFE_VFE_AHB_CLK`, `VFE_AXI` |
+| GDSC | `CAMSS_VFE_GDSC` |
+
+One gap: the msm8916 tables list a plain **`ahb`** clock, and msm8974 has no
+`CAMSS_AHB_CLK` — only `TOP_AHB` and `MICRO_AHB`. Decide what that maps to, or
+leave it out, when writing the tables.
+
+The media core is built and loads now (`camera-plan.md` stage 1), so this
+compiles and can be iterated on the phone. Testing the ISPIF and dual-VFE
+paths still needs hardware, so it is a build-and-iterate job, not a blind
+patch.
 
 ## Device tree for stage 2 (verified references)
 

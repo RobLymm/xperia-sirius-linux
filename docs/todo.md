@@ -74,30 +74,28 @@ reboot, so autoconnect works.
 
 ## 3. Camera
 
-One thing is now known that was not: the CCI control bus **is** in the booted
-device tree, with both its i2c buses, but carries `status = "disabled"`.
-Neither `I2C_QCOM_CCI` nor `MEDIA_SUPPORT` is built, and this kernel has no
-runtime device tree overlay support, so even reading the sensors' chip IDs
-needs a kernel rebuild and a flash. That makes stage 1 the gate for
-everything, including the cheap identification step.
+Staged in `camera-plan.md`. Two stages are done, and the gate has moved.
 
-
-Staged in `camera-plan.md`. The stages are unchanged; the first needs a
-kernel rebuild, which nothing else here does.
-
-- [ ] **Stage 1** — build the media stack into the kernel
-      (`MEDIA_SUPPORT`, `VIDEO_DEV`, `V4L2_FWNODE`, `I2C_QCOM_CCI`,
-      `VIDEOBUF2_DMA_CONTIG`). None are set today.
-- [ ] **Stage 2** — enable the `cci@fda0c000` node, already complete and
-      merely disabled in mainline's `qcom-msm8974.dtsi`, and read the chip ID
-      of each sensor over the bus. This settles whether the rear sensor is an
-      IMX200 or an IMX220, which the stock tuning files and the public
-      specifications disagree about.
-- [ ] **Stage 3** — re-express the msm8974 CAMSS support for 6.16. The
-      Nexus 5 patch is from 5.17 and its structure has since changed to
-      per-SoC resource tables, so it cannot be applied as it stands.
-- [ ] **Stage 4/5** — sensor drivers for the rear part and the IMX132 front,
-      from Sony's downstream register and power sequences.
+- [x] **Stage 1** — the media core. It needed no kernel rebuild and no flash:
+      every part of the media stack is tristate, and `DMA_SHARED_BUFFER`,
+      `CMA` and `DMA_CMA` are already built in for the GPU carveout, so it
+      builds out of tree against the running kernel. Eleven modules are
+      installed and loaded.
+- [x] **Stage 2** — the CCI bus and sensor identification. Both sensors
+      answer and identify themselves from the silicon: rear **IMX200**, front
+      **IMX132**. The phone runs `images/boot-cam-v2.img`, which carries the
+      tree this needs.
+- [ ] **Stage 3** — re-express the msm8974 CAMSS support for 6.16. **This is
+      now the gate**: no `/dev/video*` can exist until it lands, so neither
+      sensor driver nor libcamera nor the camera app can be tested. The Nexus
+      5 patch is from 5.17 and its structure has since changed to per-SoC
+      resource tables, so it cannot be applied as it stands. `camera.md` has
+      the implementation spec, the clock map and the four places camss
+      branches on SoC version.
+- [ ] **Stage 4/5** — sensor drivers for the IMX132 front and the IMX200
+      rear. Sony's published kernel gives the power sequences exactly and
+      **no register or mode tables at all**; those were in the userspace HAL
+      and have to come off the stock system partition.
 
 **Done when** a still is captured from each camera and a video is recorded
 from the rear one.

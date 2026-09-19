@@ -74,31 +74,106 @@ One more, for whoever writes the sensor driver: **the rear sensor reads zero
 across the whole SMIA identity block at 0x0000-0x0004.** Code that checks the
 conventional model-ID location will conclude the sensor is absent.
 
+## The media core is built and loaded
+
+**This needed no kernel rebuild and no flash**, which is the opposite of what
+this page said before. Every piece of the media stack is tristate, and the
+three things it needs built in — `DMA_SHARED_BUFFER`, `CMA`, `DMA_CMA` — the
+running kernel already has, because the GPU carveout put them there. So it
+builds out of tree against the kernel the phone is running, like the CCI
+module.
+
+Loaded on 2026-09-19, from `/lib/modules/6.16.12/updates/media/`:
+
+    mc: Linux media interface: v0.10
+    videodev: Linux video capture interface: v2.00
+
+eleven modules in all: `mc`, `videodev`, `v4l2-async`, `v4l2-fwnode`,
+`v4l2-dv-timings`, and six `videobuf2-*`. There is still no `/dev/video*`
+because nothing registers one yet.
+
+### Building them again
+
+The kernel tree is `~/kbuild/linux-6.16.12` on the phone, prepared by
+`~/kbuild/prep.sh`. The three tools are in `tools/` in this repository; copy
+them to the phone's home directory. **Every make needs `LLVM=1`**: without it
+`olddefconfig` re-detects GCC and silently drops `CONFIG_CFI_CLANG`, and GCC
+modules will not load into this kernel. `kbuild-mod.sh` passes it for you.
+
+    K=$HOME/kbuild/linux-6.16.12
+    VB="CONFIG_VIDEOBUF2_CORE=m CONFIG_VIDEOBUF2_V4L2=m CONFIG_VIDEOBUF2_MEMOPS=m
+        CONFIG_VIDEOBUF2_DMA_CONTIG=m CONFIG_VIDEOBUF2_DMA_SG=m
+        CONFIG_VIDEOBUF2_VMALLOC=m"
+
+    J=3 ./kbuild-mod.sh drivers/media/mc
+    EXTRA_SYMVERS="$K/drivers/media/mc/Module.symvers" \
+        J=3 ./kbuild-mod.sh drivers/media/v4l2-core
+    EXTRA_SYMVERS="$K/drivers/media/mc/Module.symvers
+                   $K/drivers/media/v4l2-core/Module.symvers" \
+        J=3 ./kbuild-mod.sh drivers/media/common/videobuf2 $VB
+
+`kbuild-mod.sh` builds one kernel directory as an external module, in two
+passes: the first collects unresolved symbols with `KBUILD_MODPOST_WARN=1` and
+fills them, the second is strict. Keep the order — mc, v4l2-core, videobuf2 —
+because each uses the previous one's exports. The `videobuf2` config values
+have to be given on the command line: they have no Kconfig prompt, and nothing
+selects them until camss exists.
+
+The `.ko` files land in the source directories. Copy them to
+`/lib/modules/6.16.12/updates/media/` and run `depmod -a`.
+
+Build at `J=3`. At `-j4` the phone reaches 83 °C, and the thermal governor
+then clamps all four cores to 300 MHz, so the higher job count produces more
+heat and no more speed.
+
+### Module.symvers, which nothing else on this phone had
+
+That kernel tree was never fully built, so it has no `Module.symvers`, and
+`CONFIG_MODVERSIONS=y` means modpost rejects every vmlinux symbol an
+out-of-tree module uses. Two tools solve it, and they are needed for **any**
+module work on this phone, not just the camera:
+
+- `~/harvest-symvers.py` reads the CRC every installed module recorded for the
+  symbols it imports (`modprobe --dump-modversions`) and writes them as
+  vmlinux entries. 564 modules give about 5,300 symbols. Symbols a module
+  exports rather than vmlinux are dropped, found by reading
+  `__ksymtab_strings` — `nm` does not show them.
+- `~/fill-symvers.sh <symbol>...` covers the rest: genksyms in this tree
+  produces the same CRCs, so it builds whichever object exports the symbol and
+  reads the `#SYMVER` lines out of its `.o.cmd`.
+
+**The two agree exactly** — 18 symbols in common, 18 matches, no mismatch —
+which is what makes the harvested file trustworthy. Two traps in
+`fill-symvers.sh` worth not rediscovering: a symbol can be exported from
+several files of which this configuration builds only one (`mm/nommu.c` sorts
+before `mm/vmalloc.c` and is the wrong one), and namespaced exports
+(`EXPORT_SYMBOL_NS_GPL(dma_buf_fd, "DMA_BUF")`) must keep their namespace or
+modpost stops checking `MODULE_IMPORT_NS`.
+
 ## What remains, in order
 
-1. **Kernel rebuild for the media stack.** `MEDIA_SUPPORT`, `VIDEO_DEV`,
-   `V4L2_FWNODE`, `VIDEOBUF2_DMA_CONTIG`, `I2C_QCOM_CCI`. None are set. This
-   gates everything else, including any V4L2 device for the camera app to
-   open, and it is the only item here needing a kernel build rather than a
-   module.
-2. **msm8974 CAMSS for 6.16.** The only existing work is a 5.17-era Nexus 5
-   patch; camss has since moved to per-SoC `camss_subdev_resources` tables,
-   so it must be re-expressed rather than applied. msm8974 has no camera
-   IOMMU, so `videobuf2-dma-contig` replaces the sg variant.
-3. **An IMX200 driver.** None exists anywhere. **Start from Sony's published
-   kernel**, `sonyxperiadev/kernel`,
-   `drivers/media/platform/msm/camera_v2/sensor/` — see `prior-art.md`. The
-   recent mainline IMX300 and IMX111 submissions are the closest structural
-   templates in style.
-4. **An IMX132 driver.** Exists only in the Intel-coupled
-   `staging/atomisp`, which is not usable here.
-5. **Device tree for the sensors and the ISP blocks** — CSIPHY, CSID, ISPIF,
+1. **msm8974 CAMSS for 6.16.** Now the gate: nothing downstream can be tested
+   until camss registers a `/dev/video*`. The only existing work is a 5.17-era
+   Nexus 5 patch; camss has since moved to per-SoC `camss_subdev_resources`
+   tables, so it must be re-expressed rather than applied. Two things are
+   settled: it is excluded today by `depends on (ARCH_QCOM && IOMMU_DMA)` and
+   msm8974 has no camera IOMMU, so that dependency has to go and
+   `videobuf2-dma-contig` replaces the sg variant; and every clock it needs is
+   already in mainline's `mmcc-msm8974`. The map is in `camera.md`.
+2. **An IMX200 driver.** None exists anywhere. Sony's published kernel gives
+   the power sequence exactly but **no register or mode tables** — those were
+   in the userspace HAL. See `prior-art.md` for what is and is not in that
+   source, and `camera.md` for the sequences taken from it.
+3. **An IMX132 driver.** Exists only in the Intel-coupled `staging/atomisp`,
+   which is not usable here.
+4. **Device tree for the sensors and the ISP blocks** — CSIPHY, CSID, ISPIF,
    VFE, with the sensor nodes carrying supplies, clocks, resets and CSI
    endpoints. The hardware map is in `camera.md`.
-6. **The BU64296G actuator**, a simple I2C part and the smallest of the
+5. **The BU64296G actuator**, a simple I2C part and the smallest of the
    three drivers.
 
-libcamera is already installed on the phone, so the userspace half is in
+libcamera 0.7.2 and Snapshot are installed on the phone, and libcamera's
+`simple` pipeline handler lists `qcom-camss`, so the userspace half is in
 place; Phosh's camera app reports "No Camera Found" simply because there is
 no `/dev/video*` for it to open.
 

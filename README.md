@@ -8,8 +8,10 @@ Calls, SMS, mobile data, Wi-Fi, Bluetooth, GNSS, FM radio, the display,
 touch, the sensors and the full 300 MHz to 2265.6 MHz range of all four CPU
 cores work. Audio works for the loudspeakers, earpiece, headphones and
 recording, and a call carries the caller's voice and anything the phone
-plays, but not yet what its microphone hears. The camera does not work at
-all, and suspend is off because resume loses Wi-Fi and touch.
+plays, but not yet what its microphone hears. The camera does not take
+pictures yet — the control bus, both sensors and the media core are working,
+the ISP and the sensor drivers are not — and suspend is off because resume
+loses Wi-Fi and touch.
 
 **If you have a Z2 and want it running like this one, start with
 [docs/from-stock-to-this.md](docs/from-stock-to-this.md).** It is the whole
@@ -57,7 +59,7 @@ the others listed there.
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
-| Camera | Not working | The CCI control bus is in the booted device tree but `status = "disabled"`, and neither `I2C_QCOM_CCI` nor `MEDIA_SUPPORT` is built, so there is no camera stack at all. msm8974 CAMSS support exists out of tree for the Nexus 5 and needs re-expressing for 6.16; the two Sony sensors have no drivers anywhere. `docs/camera.md`, `docs/camera-plan.md` |
+| Camera | Not working, two stages done | The control bus and the media core both work. Both sensors are identified from the silicon over CCI — rear **IMX200**, front **IMX132** — and the V4L2 media core is built and loaded, which turned out to need no kernel rebuild and no flash because every part of it is a module. What is missing is the ISP: msm8974 CAMSS exists only as a 5.17-era Nexus 5 patch and must be re-expressed for 6.16, and until it registers a `/dev/video*` nothing downstream can be tested. Then two sensor drivers that exist nowhere. `docs/camera.md`, `docs/camera-plan.md`, `docs/handover-camera.md` |
 | GPS | Working | The modem's GNSS engine, over QMI LOC on `/dev/wwan0qmi0`: a standalone session streams NMEA at 1 Hz (GGA, RMC, GSA, VTG, GSV) and tracks satellites. ModemManager can enable it directly with `--location-enable-gps-nmea`. A fix needs sky. `modem/` |
 | Mobile data | Working | A bearer comes up through NetworkManager and `wwan0` gets an address; verified by pinging and fetching a page bound to that interface rather than trusting the default route. On GPRS it is slow, and the modem has not yet been persuaded to carry data on anything faster. `modem/`, `docs/modem.md` |
 | SMS | Working | Sending and receiving both tested |
@@ -101,7 +103,8 @@ from the device on 2026-09-19.
 | Autofocus actuator | Rohm BU64296G | Detected, no driver | At 0x0c on the rear camera bus |
 | Camera module EEPROMs | | Readable | Both, at 0x50. Carry the module and sensor part numbers as ASCII |
 | Camera control bus | Qualcomm CCI | Working | Both masters enumerate; mainline `i2c-qcom-cci` binds |
-| Camera ISP | Qualcomm CAMSS | Not working | No media stack in the kernel, and msm8974 support needs re-expressing for 6.16 |
+| Camera ISP | Qualcomm CAMSS | Not working | msm8974 support needs re-expressing for 6.16, and camss is excluded from the build entirely by `depends on IOMMU_DMA`, which this SoC does not have |
+| V4L2 media core | | Working | `mc`, `videodev` and the `videobuf2` set built out of tree and loaded. No `/dev/video*` yet: nothing registers one |
 
 Read `docs/known-problems.md` before relying on any of this. The one that
 matters most: applications rendering on the GPU hang it and can eventually
@@ -140,6 +143,10 @@ renderer.
     tools/              build the board device tree and a boot image, check that
                         two device trees describe the same hardware, drive the
                         Broadcom FM tuner
+    tools/kbuild-mod.sh build a kernel directory as an out-of-tree module
+                        against the running kernel, with harvest-symvers.py
+                        and fill-symvers.sh to give it the symbol versions
+                        CONFIG_MODVERSIONS wants
     tools/fm-diag/      how the FM "flicking" was found: capture analysers and a pad clock timer
     modem/              what Sony's modem firmware needs from the AP (TA services),
                         the ta-service fix, and a QMI service honeypot
