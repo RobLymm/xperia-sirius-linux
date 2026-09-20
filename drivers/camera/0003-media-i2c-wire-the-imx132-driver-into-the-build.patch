@@ -1,0 +1,42 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] media: i2c: wire the imx132 driver into the build
+
+imx132.c was carried in this directory and copied into a kernel tree by
+hand, with no Kconfig entry and no Makefile line. Nothing could build it
+from a clean tree: dropping the source in and setting CONFIG_VIDEO_IMX132
+in .config does nothing, because olddefconfig discards a symbol Kconfig
+has never heard of, and the Makefile has no rule to reach the object.
+
+That cost a build on 2026-09-20: thirteen of the fourteen media modules
+rebuilt against a new kernel and the sensor silently did not, with no error
+to say why.
+
+Add the two lines it should always have had, modelled on VIDEO_IMX219,
+which is the nearest sensor in the same family.
+
+--- a/drivers/media/i2c/Kconfig
++++ b/drivers/media/i2c/Kconfig
+@@ -148,6 +148,16 @@
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called imx214.
+ 
++config VIDEO_IMX132
++	tristate "Sony IMX132 sensor support"
++	select V4L2_CCI_I2C
++	help
++	  This is a Video4Linux2 sensor driver for the Sony
++	  IMX132 camera, the front sensor of the Xperia Z2.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called imx132.
++
+ config VIDEO_IMX219
+ 	tristate "Sony IMX219 sensor support"
+ 	select V4L2_CCI_I2C
+--- a/drivers/media/i2c/Makefile
++++ b/drivers/media/i2c/Makefile
+@@ -160,3 +160,4 @@
+ obj-$(CONFIG_VIDEO_VP27SMPX) += vp27smpx.o
+ obj-$(CONFIG_VIDEO_VPX3220) += vpx3220.o
+ obj-$(CONFIG_VIDEO_ZORAN) += zoran.o
++obj-$(CONFIG_VIDEO_IMX132) += imx132.o

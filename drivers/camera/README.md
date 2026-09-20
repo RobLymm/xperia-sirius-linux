@@ -9,13 +9,14 @@ patches.
 
 **They work.** On an Xperia Z2 the driver probes clean, `media-ctl` shows the
 full CSIPHY → CSID → ISPIF → VFE graph, and a capture from CSID0's test
-pattern generator produces correct frames. What has not been tested is a real
-sensor, because no sensor driver exists yet.
+pattern generator produces correct frames. A real sensor works too: the
+IMX132 front camera below captures live frames through the same graph.
 
 | | |
 |---|---|
 | `0001-media-camss-add-msm8974-support.patch` | the driver: resource tables, a new SoC version, and a buffer path that works without an IOMMU |
 | `0002-ARM-dts-qcom-msm8974-add-the-camss-node.patch` | the node, disabled by default; a board enables it |
+| `0003-media-i2c-wire-the-imx132-driver-into-the-build.patch` | the Kconfig entry and Makefile line for `imx132.c`, which had neither. Without it the sensor cannot be built from a clean tree, and a rebuild skips it with no error |
 
 ## What it enumerates
 
@@ -164,6 +165,19 @@ should be. No errors in dmesg.
 # Front camera sensor: Sony IMX132
 
 `imx132.c`, and `sensor-nodes.dtsi` for the device tree half.
+
+`imx132.c` is a source file, not a patch: copy it into the kernel tree
+yourself, then apply `0003` to wire it into the build.
+
+    cp imx132.c "$KERNEL/drivers/media/i2c/imx132.c"
+
+Copy it again on every rebuild, and check the copy matches before building.
+A tree that already holds an older `imx132.c` will build that one instead, and
+the failure is not obvious: the pre-vendor-init revision has different PLL
+settings and no `#include <media/v4l2-event.h>`, so it either fails at
+`v4l2_event_subdev_unsubscribe` or, worse, builds and produces no frames.
+
+    md5sum imx132.c "$KERNEL/drivers/media/i2c/imx132.c"
 
 **It works.** The front camera captures frames on mainline Linux, and
 libcamera turns them into correct colour images.

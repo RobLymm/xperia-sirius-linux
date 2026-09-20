@@ -82,6 +82,7 @@ is old, check the phone before believing it.
 | Board device tree | `devicetree/qcom-msm8974pro-sony-xperia-shinano-sirius.dts` |
 | SoC-wide device tree changes (CPU clocks, thermal) | a kernel patch against `qcom-msm8974.dtsi`, never the board file |
 | Kernel drivers | `drivers/<subsystem>/`, and a patch in the kernel package |
+| Which source each `updates/` module is built from | `docs/out-of-tree-modules.md`. Rebuild all of them after any kernel change, or the subsystem goes missing with no visible error |
 | Packaging | the pmaports recipes: `device-sony-sirius`, `firmware-sony-sirius-modem`, `linux-postmarketos-qcom-msm8974` |
 | Userspace configuration | `userspace/` (UCM, udev, systemd) |
 | Modem support | `modem/` |

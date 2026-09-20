@@ -15,7 +15,7 @@ Read the names from the standard clock-output-names property when the device
 tree supplies it, and keep the generated names otherwise, so existing device
 trees are unaffected.
 
-Signed-off-by: 
+Signed-off-by: Rob Watson <rob@mediaeden.com>
 ---
  drivers/clk/qcom/clk-spmi-pmic-div.c | 18 ++++++++++++++++--
  1 file changed, 16 insertions(+), 2 deletions(-)

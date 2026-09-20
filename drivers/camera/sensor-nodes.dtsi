@@ -40,7 +40,16 @@
 			imx132_ep: endpoint {
 				clock-lanes = <1>;
 				data-lanes = <0 2>;
-				link-frequencies = /bits/ 64 <216000000>;
+				/*
+				 * 192 MHz: the driver's PLL setting is a
+				 * pre-divider of 2 and a multiplier of 80 on the
+				 * 19.2 MHz input. An earlier revision used 1 and
+				 * 45, giving 216 MHz; a tree still carrying that
+				 * makes the driver log "device tree says
+				 * 216000000 Hz, driver runs 192000000 Hz" and
+				 * carry on at 192.
+				 */
+				link-frequencies = /bits/ 64 <192000000>;
 				remote-endpoint = <&csiphy2_ep>;
 			};
 		};

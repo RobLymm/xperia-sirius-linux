@@ -138,8 +138,9 @@ shrinker dereferencing a null file on carveout backed objects -- is fixed by
     drivers/camera/     camera ISP: msm8974 support for mainline's CAMSS
                         driver, and its device tree node. Captures frames
                         from the CSID test pattern generator. Also the
-                        IMX132 front sensor driver, written but not yet
-                        bound to the sensor
+                        IMX132 front sensor driver: the front camera
+                        captures real frames and the Phosh camera app
+                        takes photos
     panel-variants/     the six panel configurations extracted from stock,
                         and a generated DRM driver for each
     devicetree/         the board device tree the phone actually runs
