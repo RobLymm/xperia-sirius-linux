@@ -230,3 +230,45 @@ test.
 
 Until both land, this repository is the reference, and the board file plus the
 kernel package are what a Z2 needs.
+
+
+## Publishing to GitHub
+
+Added 2026-09-20, because it was not written down and a push that day left the
+top-level README describing the GPU as it had been that morning.
+
+The repository is `git@github.com:RobLymm/xperia-sirius-linux.git`, branch
+`main`. Pushing the files is the easy half; the parts that go stale are the
+ones nobody is forced to touch.
+
+**Before pushing, work outwards from the change:**
+
+1. **The subsystem README** next to the patches. What the patch does, what
+   was measured, and how someone else would check it.
+2. **The state table in the top-level `README.md`**, and the sentence under it
+   that names the biggest problem. This is what a visitor reads first and it
+   is the easiest thing to leave behind. A change that alters what works, or
+   what is known about why something does not, belongs here.
+3. **`Last verified against the device on <date>`** in every README the change
+   touches, including the top-level one. Different files carry different
+   dates on purpose; each means the last time *that* page was checked.
+4. **`docs/known-problems.md`** if the change alters a known problem, even
+   when it does not fix it. Narrowing a cause counts.
+
+**The GitHub repository metadata is part of the documentation and has no file
+in the repository, so nothing reminds you.** Check it after any change that
+adds a subsystem or changes what works:
+
+    curl -s https://api.github.com/repos/RobLymm/xperia-sirius-linux |
+        python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["description"]); print(d["topics"])'
+
+The description should name the subsystems someone would search for. It is
+set from the repository page, or with a token:
+
+    curl -X PATCH -H "Authorization: Bearer $GITHUB_TOKEN" \
+        https://api.github.com/repos/RobLymm/xperia-sirius-linux \
+        -d '{"description":"..."}'
+
+As of 2026-09-20 the description still listed only the panel, sound, modem and
+GNSS work: it predated the camera, the CPU frequency scaling and the GPU.
+
