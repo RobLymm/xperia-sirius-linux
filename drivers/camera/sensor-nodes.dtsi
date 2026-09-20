@@ -30,6 +30,22 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&cam_front_default>;
 
+		/*
+		 * How the part is mounted, which is what tells an application
+		 * which way up the frames are. Sony's own tree gives this
+		 * sensor qcom,mount-angle = <270> and qcom,sensor-position =
+		 * <1>, front; the mainline properties are rotation in degrees
+		 * and orientation, where 0 is front.
+		 *
+		 * Without them v4l2_fwnode_device_parse() creates no
+		 * V4L2_CID_CAMERA_ORIENTATION or _SENSOR_ROTATION control,
+		 * and libcamera says "Failed to retrieve the camera location"
+		 * and "Rotation control not available, default to 0 degrees",
+		 * then shows the preview on its side.
+		 */
+		rotation = <270>;
+		orientation = <0>;
+
 		port {
 			/*
 			 * Clock on lane 1 with data on 0 and 2 is what Sony's
