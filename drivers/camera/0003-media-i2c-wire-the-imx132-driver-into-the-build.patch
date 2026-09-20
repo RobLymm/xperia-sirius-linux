@@ -13,12 +13,11 @@ to say why.
 
 Add the two lines it should always have had, modelled on VIDEO_IMX219,
 which is the nearest sensor in the same family.
-
 --- a/drivers/media/i2c/Kconfig
 +++ b/drivers/media/i2c/Kconfig
-@@ -148,6 +148,16 @@
- 	  To compile this driver as a module, choose M here: the
- 	  module will be called imx214.
+@@ -127,6 +127,16 @@
+           To compile this driver as a module, choose M here: the
+           module will be called hi847.
  
 +config VIDEO_IMX132
 +	tristate "Sony IMX132 sensor support"
@@ -30,13 +29,16 @@ which is the nearest sensor in the same family.
 +	  To compile this driver as a module, choose M here: the
 +	  module will be called imx132.
 +
- config VIDEO_IMX219
- 	tristate "Sony IMX219 sensor support"
- 	select V4L2_CCI_I2C
+ config VIDEO_IMX208
+ 	tristate "Sony IMX208 sensor support"
+ 	help
 --- a/drivers/media/i2c/Makefile
 +++ b/drivers/media/i2c/Makefile
-@@ -160,3 +160,4 @@
- obj-$(CONFIG_VIDEO_VP27SMPX) += vp27smpx.o
- obj-$(CONFIG_VIDEO_VPX3220) += vpx3220.o
- obj-$(CONFIG_VIDEO_ZORAN) += zoran.o
+@@ -45,6 +45,7 @@
+ obj-$(CONFIG_VIDEO_HI846) += hi846.o
+ obj-$(CONFIG_VIDEO_HI847) += hi847.o
+ obj-$(CONFIG_VIDEO_I2C) += video-i2c.o
 +obj-$(CONFIG_VIDEO_IMX132) += imx132.o
+ obj-$(CONFIG_VIDEO_IMX208) += imx208.o
+ obj-$(CONFIG_VIDEO_IMX214) += imx214.o
+ obj-$(CONFIG_VIDEO_IMX219) += imx219.o

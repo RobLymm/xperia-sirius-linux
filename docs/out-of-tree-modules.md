@@ -109,7 +109,32 @@ Confirm the routing reached the card with:
 
 which should list eight `MultiMediaN Mixer INT_FM_TX` controls.
 
-## `media` needs a file copied before it will build
+## `media` and `cci` are out-of-tree only until pkgrel 18
+
+The kernel package had `CONFIG_MEDIA_SUPPORT` switched off entirely and did
+not carry the camss driver patch — only its device tree node. That is why all
+fifteen camera modules had to be built by hand.
+
+**Fixed for the next build.** pkgrel 18 adds
+`0034-media-camss-add-msm8974-support.patch` (the driver),
+`0035-media-i2c-add-the-sony-imx132-sensor-driver.patch` (the source file) and
+`0036-media-i2c-wire-the-imx132-driver-into-the-build.patch` (Kconfig and
+Makefile), and turns on the 25 media options. After flashing pkgrel 18 or
+later, **delete `updates/media/` and `updates/cci/`** as well.
+
+`CONFIG_V4L_PLATFORM_DRIVERS=y` is the one to watch. It is a plain menu option
+with no default, nothing selects it, and `VIDEO_QCOM_CAMSS` depends on it — so
+without it `olddefconfig` silently drops the camss driver and the build
+finishes with no camera and no error. Check a config change with:
+
+    make LLVM=1 ARCH=arm olddefconfig && grep VIDEO_QCOM_CAMSS .config
+
+`videobuf2-vmalloc` is in `updates/media/` but nothing on this device depends
+on it and it is never loaded. It is not carried into the package.
+
+## The imx132 source file
+
+
 
 `drivers/camera/imx132.c` is a source file, not a patch. It has to be copied
 into `drivers/media/i2c/` and wired in with
@@ -129,9 +154,11 @@ After any kernel change, rebuild all 28, install them, `depmod -a`, reboot,
 and then:
 
 On the first boot of a kernel built from pkgrel 18 or later, first delete
-`updates/qdsp6-fm/` and `updates/pmic-clkdiv/` — those six modules are in the
-package now, and the old copies would shadow them. That leaves 22 to rebuild,
-not 28.
+`updates/media/`, `updates/cci/`, `updates/qdsp6-fm/` and
+`updates/pmic-clkdiv/` — those 21 modules are in the package now, and the old
+copies would shadow them. That leaves **7** to rebuild, not 28: the six
+`q6voice` modules and `snd-soc-wcd9320`, which are drivers mainline does not
+have and are not in the kernel package.
 
     dmesg | grep -ciE "disagrees about version|Unknown symbol"   # want 0
     cat /proc/asound/cards                                       # want card 0
