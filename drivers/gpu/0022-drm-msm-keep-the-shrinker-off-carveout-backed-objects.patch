@@ -1,0 +1,49 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm: keep the shrinker off carveout backed objects
+
+On hardware with no IOMMU, msm hands out pages from a VRAM carveout and
+those objects are created with drm_gem_private_object_init(), so they have
+no shmem file. Nothing stops the shrinker from taking them.
+
+Purging one reaches the end of msm_gem_purge(), which calls
+shmem_truncate_range(file_inode(obj->filp), ...) on a NULL file. On an
+Adreno 330 with a 512 MB carveout this kills kswapd inside the GEM locks,
+and the compositor then blocks in msm_gem_madvise() forever, which freezes
+the display with no way back but a reboot:
+
+    Unable to handle kernel NULL pointer dereference at virtual address 00000014
+    PC is at msm_gem_purge+0x100/0x15c
+    Comm: kswapd0
+    msm_gem_purge <- purge <- drm_gem_lru_scan <- msm_gem_shrinker_scan
+                  <- do_shrink_slab <- shrink_slab <- shrink_node
+                  <- balance_pgdat <- kswapd
+
+Evicting one is quieter and worse: put_pages() returns the carveout
+allocation, and there is no shmem file to page the contents back in from,
+so the object comes back holding whatever the allocator hands out next.
+
+Neither helps the system in any case: carveout pages are reserved at boot
+and returning them frees no system memory.
+
+Report both kinds as unpurgeable, which also covers eviction through
+is_unevictable().
+
+--- a/drivers/gpu/drm/msm/msm_gem.h	2026-09-20 12:24:55.505473724 +0100
++++ b/drivers/gpu/drm/msm/msm_gem.h	2026-09-20 12:24:55.552660742 +0100
+@@ -230,6 +230,16 @@
+ /* imported/exported objects are not purgeable: */
+ static inline bool is_unpurgeable(struct msm_gem_object *msm_obj)
+ {
++	/*
++	 * Without an IOMMU the driver hands out pages from the VRAM
++	 * carveout, and those objects have no shmem file behind them.
++	 * The shrinker must leave them alone. Purging one dereferences
++	 * obj->filp, which is NULL, and evicting one frees the only copy
++	 * of its contents: there is nothing to page them back in from.
++	 */
++	if (!msm_obj->base.filp)
++		return true;
++
+ 	return drm_gem_is_imported(&msm_obj->base) || msm_obj->pin_count;
+ }
+ 

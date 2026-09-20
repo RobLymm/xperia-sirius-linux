@@ -1,0 +1,52 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm: do not report submission statistics the GPU never wrote
+
+retire_submit() reads a per-submission statistics slot out of the ring's
+memptrs and reports the elapsed time and CP clock from it. Those fields are
+written by the GPU as it runs the submission, but only a6xx emits the
+packets that write them: a3xx and a4xx have no always-on counter and write
+nothing there.
+
+Nothing clears the slot either, and it is reused every
+MSM_GPU_SUBMIT_STATS_COUNT submissions, so on those generations it holds
+whatever was last in that memory. Without an IOMMU the ring comes out of
+the VRAM carveout, which is not zeroed, and the values are wild. On an
+Adreno 330:
+
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -654,6 +654,25 @@
+  * Cmdstream submission/retirement:
+  */
+ 
++/*
++ * The submission statistics are memory the GPU writes as it runs the
++ * submission. Not every generation writes them: A3XX and A4XX have no
++ * always-on counter and emit nothing here. The slot is reused every
++ * MSM_GPU_SUBMIT_STATS_COUNT submissions, so left alone it holds whatever
++ * the previous owner of that memory left behind, and retire reports it as
++ * an elapsed time. Clear it before the GPU runs the submission.
++ */
++static void clear_submit_stats(struct msm_ringbuffer *ring, uint32_t seqno)
++{
++	volatile struct msm_gpu_submit_stats *stats =
++		&ring->memptrs->stats[seqno % MSM_GPU_SUBMIT_STATS_COUNT];
++
++	stats->cpcycles_start = 0;
++	stats->cpcycles_end   = 0;
++	stats->alwayson_start = 0;
++	stats->alwayson_end   = 0;
++}
++
+ static void retire_submit(struct msm_gpu *gpu, struct msm_ringbuffer *ring,
+ 		struct msm_gem_submit *submit)
+ {
+@@ -769,6 +788,8 @@
+ 
+ 	submit->seqno = submit->hw_fence->seqno;
+ 
++	clear_submit_stats(ring, submit->seqno);
++
+ 	update_sw_cntrs(gpu);
+ 
+ 	/*

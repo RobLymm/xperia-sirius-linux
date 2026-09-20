@@ -1,0 +1,36 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm: do not truncate the divisor when computing the CP clock
+
+retire_submit() guards the division with the full 64 bit value:
+
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -17,6 +17,7 @@
+ #include <linux/string_helpers.h>
+ #include <linux/devcoredump.h>
+ #include <linux/sched/task.h>
++#include <linux/math64.h>
+ 
+ /*
+  * Power Management:
+@@ -688,11 +689,15 @@
+ 
+ 	cycles = stats->cpcycles_end - stats->cpcycles_start;
+ 
+-	/* Calculate the clock frequency from the number of CP cycles */
+-	if (elapsed) {
+-		clock = cycles * 1000;
+-		do_div(clock, elapsed);
+-	}
++	/*
++	 * Calculate the clock frequency from the number of CP cycles.
++	 * do_div() takes a 32 bit divisor, so it would divide by the low
++	 * half of elapsed alone: zero often enough to matter, and wrong the
++	 * rest of the time. elapsed passes 32 bits at 4.3 seconds, which is
++	 * what a stalled submission takes.
++	 */
++	if (elapsed)
++		clock = div64_u64(cycles * 1000, elapsed);
+ 
+ 	submit->queue->ctx->elapsed_ns += elapsed;
+ 	submit->queue->ctx->cycles     += cycles;

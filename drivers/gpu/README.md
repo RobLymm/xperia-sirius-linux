@@ -6,6 +6,62 @@ is about the patches here and how to use them.
 
 Last verified against the device on 2026-09-20.
 
+## The four that are fixes, not instrumentation
+
+**`0022-drm-msm-keep-the-shrinker-off-carveout-backed-objects.patch`** and
+**`0023-drm-msm-reclaim-carveout-objects-when-the-carveout-fills.patch`** are
+a pair and must be taken together. Without an IOMMU, msm serves GEM objects
+out of a VRAM carveout, and those objects are created with
+`drm_gem_private_object_init()`, so they have no shmem file. Nothing stopped
+the shrinker taking one: purging it reached
+`shmem_truncate_range(file_inode(obj->filp), ...)` on a NULL file, killing
+kswapd inside the GEM locks and leaving the compositor blocked in
+`msm_gem_madvise()` with no way back but a reboot. Evicting one was quieter
+and worse -- `put_pages()` returned the carveout allocation with no backing
+store to restore from. Freeing them also returned nothing to the system,
+because the carveout is reserved at boot, while the shrinker counted the full
+size as reclaimed.
+
+0022 reports them unpurgeable, which also covers eviction. 0023 is the
+companion: with the shrinker barred, nothing else would ever reclaim the
+carveout, so `get_pages_vram()` now purges the objects userspace has marked
+DONTNEED and retries once before giving up.
+
+Verified on the device: firing the shrinker directly through
+`/sys/kernel/debug/dri/0/shrink` with 39 purgeable carveout objects present
+returned SHRINK_STOP and purged none, and 928 MiB of memory pressure --
+MemAvailable down to 111 MB, CmaFree to 92 kB -- left `Purged` at zero with
+no crash. Separately, with the carveout sized down until it genuinely filled,
+0023 reclaimed 49 objects, which only it can do once 0022 is in place.
+
+**`0024-drm-msm-do-not-report-statistics-the-gpu-never-wrote.patch`** and
+**`0025-drm-msm-do-not-truncate-the-divisor-for-the-cp-clock.patch`** are also
+a pair, and 0025 is a bug for every Adreno, not just this one.
+`retire_submit()` reads per-submission statistics out of the ring, but only
+a6xx emits the packets that write them; a3xx and a4xx write nothing, nothing
+clears the slot, and it is reused every 64 submissions, so the values are
+whatever was last in that memory. Measured here:
+
+    msm_gpu_submit_retired: elapsed=96076787681504331 ns mhz=8478678518
+                            start=-9 end=-83886081
+
+0024 clears the slot before the GPU runs the submission.
+
+0025 fixes the arithmetic that consumes it. The guard tests all 64 bits:
+
+    if (elapsed) {
+            clock = cycles * 1000;
+            do_div(clock, elapsed);
+    }
+
+but `do_div()` takes a 32 bit divisor -- `uint32_t __base = (base)` -- so it
+divides by the low half alone. High half set, low half zero, and the guard
+passes with a zero divisor. `elapsed` passes 32 bits at 4.3 seconds, so any
+Adreno reaches this whenever a submission stalls, which is exactly the case
+the value is read for. On this phone it fired about once a second while
+drawing: 93 kernel stack dumps in the first 375 seconds of uptime, and zero
+after the fix.
+
 The driver for this GPU is `drm/msm` in the kernel with Mesa's freedreno in
 userspace. Both are written for Adreno hardware, and heavy 3D runs on them
 without trouble: glmark2 completes every scene, full screen, for over five
@@ -13,8 +69,10 @@ minutes with no hang. The lockups come from what GTK applications draw.
 
 ## What is here
 
-Four patches against 6.16.12, carried in postmarketOS's
-`linux-postmarketos-qcom-msm8974` aport as patches 0018 to 0021.
+Eight patches against 6.16.12, carried in postmarketOS's
+`linux-postmarketos-qcom-msm8974` aport. 0018 to 0021 make the GPU report
+what it already knows; 0022 to 0025 are ordinary kernel bugs found while
+looking, each of which stands on its own and is not specific to this phone.
 
 **`0018-drm-msm-a3xx-report-the-faults-the-gpu-already-raises.patch`** — the
 one that changed the investigation. `a3xx_irq()` read `RBBM_INT_0_STATUS`,

@@ -1,0 +1,121 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm: reclaim carveout objects when the carveout fills
+
+The previous patch takes carveout backed objects away from the shrinker,
+because purging one there dereferences a NULL obj->filp, evicting one
+destroys the only copy of its contents, and freeing one returns nothing to
+the system: the carveout is reserved at boot.
+
+That leaves the carveout with nothing to reclaim it. get_pages_vram()
+returns the allocator's error and gives up, so once a 512 MB carveout fills
+with objects userspace has finished with, every later allocation fails even
+though the space is free for the taking.
+
+Reclaim them where it is both safe and useful: inside the allocator. On a
+failed drm_mm_insert_node(), purge the carveout objects marked DONTNEED and
+try once more. drm_gem_lru_scan() is already written for this call site --
+it drops the LRU lock around the callback and takes each object's lock with
+a trylock, so the object we are allocating for is skipped rather than
+deadlocked on.
+
+msm_gem_purge() is correct for a carveout object up to the point where it
+tells shmem to drop the backing pages. put_pages() has by then returned the
+object's space through put_pages_vram(), which is the part that matters, so
+return before the shmem calls when there is no file.
+
+--- a/drivers/gpu/drm/msm/msm_gem.h
++++ b/drivers/gpu/drm/msm/msm_gem.h
+@@ -249,6 +249,19 @@
+ 			!is_unpurgeable(msm_obj);
+ }
+ 
++/*
++ * Carveout objects are kept away from the shrinker above, because freeing
++ * one returns nothing to the system: the carveout is reserved at boot. The
++ * carveout allocator can still reclaim one to make room within the carveout
++ * itself, which is the only way that space is ever recovered.
++ */
++static inline bool is_vram_purgeable(struct msm_gem_object *msm_obj)
++{
++	return !msm_obj->base.filp && (msm_obj->madv == MSM_MADV_DONTNEED) &&
++			msm_obj->sgt && !drm_gem_is_imported(&msm_obj->base) &&
++			!msm_obj->pin_count;
++}
++
+ static inline bool is_vunmapable(struct msm_gem_object *msm_obj)
+ {
+ 	msm_gem_assert_locked(&msm_obj->base);
+--- a/drivers/gpu/drm/msm/msm_gem.c
++++ b/drivers/gpu/drm/msm/msm_gem.c
+@@ -135,6 +135,23 @@
+ 	mutex_unlock(&priv->lru.lock);
+ }
+ 
++/*
++ * Reclaim a carveout object that the shrinker is not allowed to touch, to
++ * make room inside the carveout. Only the allocator below calls this.
++ */
++static bool purge_vram(struct drm_gem_object *obj)
++{
++	if (!is_vram_purgeable(to_msm_bo(obj)))
++		return false;
++
++	if (msm_gem_active(obj))
++		return false;
++
++	msm_gem_purge(obj);
++
++	return true;
++}
++
+ /* allocate pages from VRAM carveout, used when no IOMMU: */
+ static struct page **get_pages_vram(struct drm_gem_object *obj, int npages)
+ {
+@@ -151,6 +168,24 @@
+ 	spin_lock(&priv->vram.lock);
+ 	ret = drm_mm_insert_node(&priv->vram.mm, msm_obj->vram_node, npages);
+ 	spin_unlock(&priv->vram.lock);
++
++	if (ret) {
++		unsigned long remaining = 0;
++
++		/*
++		 * The carveout is full. The shrinker leaves carveout objects
++		 * alone, so nothing else will ever reclaim them: drop the
++		 * ones userspace has marked DONTNEED and try once more.
++		 */
++		drm_gem_lru_scan(&priv->lru.dontneed, npages, &remaining,
++				purge_vram);
++
++		spin_lock(&priv->vram.lock);
++		ret = drm_mm_insert_node(&priv->vram.mm, msm_obj->vram_node,
++				npages);
++		spin_unlock(&priv->vram.lock);
++	}
++
+ 	if (ret) {
+ 		kvfree(p);
+ 		return ERR_PTR(ret);
+@@ -850,7 +885,7 @@
+ 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+ 
+ 	msm_gem_assert_locked(obj);
+-	GEM_WARN_ON(!is_purgeable(msm_obj));
++	GEM_WARN_ON(!is_purgeable(msm_obj) && !is_vram_purgeable(msm_obj));
+ 
+ 	/* Get rid of any iommu mapping(s): */
+ 	put_iova_spaces(obj, true);
+@@ -870,6 +905,13 @@
+ 
+ 	drm_gem_free_mmap_offset(obj);
+ 
++	/*
++	 * A carveout object has no shmem file behind it, and put_pages()
++	 * above has already returned its space to the carveout allocator.
++	 */
++	if (!obj->filp)
++		return;
++
+ 	/* Our goal here is to return as much of the memory as
+ 	 * is possible back to the system as we are called from OOM.
+ 	 * To do this we must instruct the shmfs to drop all of its
