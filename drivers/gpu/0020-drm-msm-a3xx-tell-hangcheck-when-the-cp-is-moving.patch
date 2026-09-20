@@ -1,0 +1,48 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm/a3xx: tell the hangcheck timer when the CP is moving
+
+Without a progress callback the hangcheck timer cannot tell a slow
+submission from a stopped one, so a long frame is killed exactly like a
+lockup and the GPU is reset under a working application.
+
+Sample the two indirect buffer pointers and their remaining sizes, which is
+what Qualcomm's driver samples for the same purpose.
+
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 06:50:51.810933569 +0100
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 06:50:51.810875640 +0100
+@@ -546,6 +546,27 @@
+ 	return ring->memptrs->rptr;
+ }
+ 
++/*
++ * Whether the command processor has moved since the last check. Without
++ * this the hangcheck timer cannot tell a slow submission from a stopped
++ * one, and kills both.
++ */
++static bool a3xx_progress(struct msm_gpu *gpu, struct msm_ringbuffer *ring)
++{
++	struct msm_cp_state cp_state = {
++		.ib1_base = gpu_read(gpu, REG_AXXX_CP_IB1_BASE),
++		.ib2_base = gpu_read(gpu, REG_AXXX_CP_IB2_BASE),
++		.ib1_rem  = gpu_read(gpu, REG_AXXX_CP_IB1_BUFSZ),
++		.ib2_rem  = gpu_read(gpu, REG_AXXX_CP_IB2_BUFSZ),
++	};
++	bool progress;
++
++	progress = !!memcmp(&cp_state, &ring->last_cp_state, sizeof(cp_state));
++	ring->last_cp_state = cp_state;
++
++	return progress;
++}
++
+ static const struct adreno_gpu_funcs funcs = {
+ 	.base = {
+ 		.get_param = adreno_get_param,
+@@ -566,6 +587,7 @@
+ 		.gpu_state_put = adreno_gpu_state_put,
+ 		.create_address_space = adreno_create_address_space,
+ 		.get_rptr = a3xx_get_rptr,
++		.progress = a3xx_progress,
+ 	},
+ };
+ 

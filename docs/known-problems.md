@@ -1,6 +1,6 @@
 # Known problems
 
-Last verified against the device on 2026-09-19.
+Last verified against the device on 2026-09-20.
 
 The things that will bite you, and what is understood about each.
 
@@ -22,8 +22,33 @@ exist in GTK 4.22, and `GDK_DISABLE=gles-api` silently falls back to cairo
 rather than doing what it appears to do, so both can look like fixes while
 changing nothing.
 
-A real fix is kernel side. A GPU hang core dump was captured and is the
-starting point for anyone wanting to work on it.
+What the GPU is doing at the moment it stalls is now known, because it says
+so. Its interrupt handler in `drm/msm` read the error status, cleared it and
+looked at nothing, and the hardware's own hang detector was never switched on;
+the patches in `../drivers/gpu/` fix both. With them, a 48 second test of
+scrolling a list by touch produced seven hardware fault reports against three
+lockups the driver declared, and the hardware reported them seconds earlier.
+
+Every report is the same: interrupt bit 24, the interface hang detector. No
+protected register was written, and the bus error status is a constant that
+reads the same on a healthy idle GPU. The command processor is waiting on its
+register interface while the shader front end, vertex fetch and primitive
+control blocks are busy. That is a draw that never finishes, not a bad packet.
+
+What has been ruled out, each by measurement: the GPU clock rate, which hangs
+at 330 MHz exactly as at 578 MHz; tile binning and tiled rendering; GTK draw
+merging and its GL extension switches; Mesa half precision lowering, shader
+compile threading and growable command buffers; and the microcode, since
+Sony's stock copies are byte for byte identical to the packaged ones. Heavy
+3D does not hang it: glmark2 runs every scene for over five minutes clean.
+
+What does matter is touch. With the radio daemon, its scan and the sound
+server all replaced by fixed answers, a list scrolled by a finger hung six
+times in 66 seconds, while the same list scrolled by the test harness did not
+hang at all. Only a finger can push a list past its end, which draws the
+overshoot glow: layered radial gradients through the most expensive shader
+GTK has, resized every frame. A finger press also marks the row and every
+widget above it, up into the window behind the popover.
 
 ## The GPU memory shrinker can crash and take the compositor with it
 

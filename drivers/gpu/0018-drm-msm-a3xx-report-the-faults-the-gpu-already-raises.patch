@@ -1,0 +1,105 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm/a3xx: report the faults the GPU already raises
+
+a3xx_irq() read RBBM_INT_0_STATUS and cleared it without looking, so an
+opcode error, a protected register write, a bus error or an out of bounds
+cache access all left no trace. Those interrupts were enabled the whole time.
+
+Print the status along with CP_PROTECT_STATUS, RBBM_AHB_ERROR_STATUS,
+CP_STAT, RBBM_STATUS and where the command processor is, and clear a bus
+error so it does not repeat. Also enable the hardware's hang detect
+interrupt and program RBBM_INTERFACE_HANG_INT_CTL with the value this
+revision wants, 0x8000ffff on an a330v2, where every part was given the
+earlier revision's 0x00010fff.
+
+Qualcomm's driver for this generation does both.
+
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 06:50:51.807541306 +0100
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 06:50:51.807471984 +0100
+@@ -8,21 +8,30 @@
+ 
+ #include "a3xx_gpu.h"
+ 
+-#define A3XX_INT0_MASK \
++/*
++ * The interrupts that report a fault. These were already enabled, but the
++ * handler cleared them without looking, so a GPU that reported an opcode
++ * error, a protected register write or a bus error looked silent.
++ */
++#define A3XX_INT0_ERROR_MASK \
+ 	(A3XX_INT0_RBBM_AHB_ERROR |        \
+ 	 A3XX_INT0_RBBM_ATB_BUS_OVERFLOW | \
+ 	 A3XX_INT0_CP_T0_PACKET_IN_IB |    \
+ 	 A3XX_INT0_CP_OPCODE_ERROR |       \
+ 	 A3XX_INT0_CP_RESERVED_BIT_ERROR | \
+ 	 A3XX_INT0_CP_HW_FAULT |           \
+-	 A3XX_INT0_CP_IB1_INT |            \
+-	 A3XX_INT0_CP_IB2_INT |            \
+-	 A3XX_INT0_CP_RB_INT |             \
+ 	 A3XX_INT0_CP_REG_PROTECT_FAULT |  \
+ 	 A3XX_INT0_CP_AHB_ERROR_HALT |     \
+-	 A3XX_INT0_CACHE_FLUSH_TS |        \
++	 A3XX_INT0_MISC_HANG_DETECT |      \
+ 	 A3XX_INT0_UCHE_OOB_ACCESS)
+ 
++#define A3XX_INT0_MASK \
++	(A3XX_INT0_ERROR_MASK |            \
++	 A3XX_INT0_CP_IB1_INT |            \
++	 A3XX_INT0_CP_IB2_INT |            \
++	 A3XX_INT0_CP_RB_INT |             \
++	 A3XX_INT0_CACHE_FLUSH_TS)
++
+ extern bool hang_debug;
+ 
+ static void a3xx_dump(struct msm_gpu *gpu);
+@@ -235,7 +244,8 @@
+ 	/* Turn on hang detection - this spews a lot of useful information
+ 	 * into the RBBM registers on a hang:
+ 	 */
+-	gpu_write(gpu, REG_A3XX_RBBM_INTERFACE_HANG_INT_CTL, 0x00010fff);
++	gpu_write(gpu, REG_A3XX_RBBM_INTERFACE_HANG_INT_CTL,
++		adreno_is_a330v2(adreno_gpu) ? 0x8000ffff : 0x00010fff);
+ 
+ 	/* Enable 64-byte cacheline size. HW Default is 32-byte (0x000000E0): */
+ 	gpu_write(gpu, REG_A3XX_UCHE_CACHE_MODE_CONTROL_REG, 0x00000001);
+@@ -416,6 +426,30 @@
+ 	return true;
+ }
+ 
++static void a3xx_err_irq(struct msm_gpu *gpu, uint32_t status)
++{
++	struct device *dev = &gpu->pdev->dev;
++
++	dev_err_ratelimited(dev,
++		"error: int0 %08x, protect %08x, ahb-err %08x, cp-stat %08x, rbbm %08x\n",
++		status,
++		gpu_read(gpu, REG_A3XX_CP_PROTECT_STATUS),
++		gpu_read(gpu, REG_A3XX_RBBM_AHB_ERROR_STATUS),
++		gpu_read(gpu, REG_AXXX_CP_STAT),
++		gpu_read(gpu, REG_A3XX_RBBM_STATUS));
++	dev_err_ratelimited(dev,
++		"       ib1 %08x left %u, ib2 %08x left %u, ring rptr %u wptr %u\n",
++		gpu_read(gpu, REG_AXXX_CP_IB1_BASE),
++		gpu_read(gpu, REG_AXXX_CP_IB1_BUFSZ),
++		gpu_read(gpu, REG_AXXX_CP_IB2_BASE),
++		gpu_read(gpu, REG_AXXX_CP_IB2_BUFSZ),
++		gpu_read(gpu, REG_AXXX_CP_RB_RPTR),
++		gpu_read(gpu, REG_AXXX_CP_RB_WPTR));
++
++	if (status & A3XX_INT0_RBBM_AHB_ERROR)
++		gpu_write(gpu, REG_A3XX_RBBM_AHB_CMD, BIT(3));
++}
++
+ static irqreturn_t a3xx_irq(struct msm_gpu *gpu)
+ {
+ 	uint32_t status;
+@@ -423,7 +457,8 @@
+ 	status = gpu_read(gpu, REG_A3XX_RBBM_INT_0_STATUS);
+ 	DBG("%s: %08x", gpu->name, status);
+ 
+-	// TODO
++	if (status & A3XX_INT0_ERROR_MASK)
++		a3xx_err_irq(gpu, status);
+ 
+ 	gpu_write(gpu, REG_A3XX_RBBM_INT_CLEAR_CMD, status);
+ 

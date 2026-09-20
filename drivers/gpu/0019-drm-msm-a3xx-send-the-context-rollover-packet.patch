@@ -1,0 +1,33 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm/a3xx: send the context rollover packet
+
+The dummy set-constant that makes the shader front end roll its context has
+sat behind #if 0 since this driver was written, and no longer compiled: the
+register it names was renamed and the CP_REG helper is gone. Qualcomm's
+driver sends this packet after every A3XX submission.
+
+The shader front end is one of the blocks left busy when this GPU locks up
+under many small draws.
+
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 06:50:51.809313661 +0100
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 06:50:51.809253769 +0100
+@@ -81,12 +81,15 @@
+ 	OUT_RING(ring, rbmemptr(ring, fence));
+ 	OUT_RING(ring, submit->seqno);
+ 
+-#if 0
+-	/* Dummy set-constant to trigger context rollover */
++	/*
++	 * Dummy set-constant to trigger context rollover. Qualcomm's driver
++	 * sends this after every A3XX submission; upstream has carried it
++	 * disabled since this driver was written.
++	 */
+ 	OUT_PKT3(ring, CP_SET_CONSTANT, 2);
+-	OUT_RING(ring, CP_REG(REG_A3XX_HLSQ_CL_KERNEL_GROUP_X_REG));
++	OUT_RING(ring, (0x4 << 16) |
++		(REG_A3XX_HLSQ_CL_KERNEL_GROUP(0) - 0x2000));
+ 	OUT_RING(ring, 0x00000000);
+-#endif
+ 
+ 	adreno_flush(gpu, ring, REG_AXXX_CP_RB_WPTR);
+ }

@@ -54,7 +54,7 @@ the others listed there.
 | Wi-Fi | Working | Broadcom brcmfmac over SDIO, in-tree driver |
 | FDE | Not tested | The test install is unencrypted |
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
-| 3D | Partly working | Adreno 330 through freedreno runs the compositor, on mesa 26.2.2. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer, set in `/etc/sirius-renderer`. Needs a VRAM carveout. `docs/known-problems.md` |
+| 3D | Partly working | Adreno 330 through freedreno runs the compositor, on mesa 26.2.2. Applications rendering on the GPU hang it, so GTK applications use the cairo renderer, set in `/etc/sirius-renderer`. Needs a VRAM carveout. `drivers/gpu/`, `docs/known-problems.md` |
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |

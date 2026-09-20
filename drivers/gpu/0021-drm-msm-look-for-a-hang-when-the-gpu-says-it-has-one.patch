@@ -1,0 +1,68 @@
+From: Rob Lymm <rob@mediaeden.com>
+Subject: [PATCH] drm/msm: look for a hang when the GPU says it has one
+
+On A3XX the hardware has its own interface hang detector. With it enabled,
+an Adreno 330 reports a stall several seconds before the hangcheck timer
+notices, and reports stalls that clear by themselves: in one 48 second test
+the hardware raised seven, while the timer declared three lockups eighteen
+seconds after the first report.
+
+Waiting that long matters twice over. The screen stays frozen, and the GPU
+state captured for diagnosis is taken long after whatever went wrong, so it
+no longer describes the fault.
+
+Add msm_gpu_hangcheck_soon(), which brings a pending hangcheck forward
+without changing what it decides: if the submission has retired, or the
+command processor has moved since the last look, nothing happens. Call it
+from the A3XX handler when the hang detect interrupt arrives.
+
+diff -ruN a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 08:26:07.878692232 +0100
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c	2026-09-20 08:25:45.589689273 +0100
+@@ -451,6 +451,14 @@
+ 
+ 	if (status & A3XX_INT0_RBBM_AHB_ERROR)
+ 		gpu_write(gpu, REG_A3XX_RBBM_AHB_CMD, BIT(3));
++
++	/*
++	 * The GPU's own interface hang detector fires seconds before the
++	 * hangcheck timer would notice, and fires for stalls that clear by
++	 * themselves. Ask the timer to look now; it still decides.
++	 */
++	if (status & A3XX_INT0_MISC_HANG_DETECT)
++		msm_gpu_hangcheck_soon(gpu);
+ }
+ 
+ static irqreturn_t a3xx_irq(struct msm_gpu *gpu)
+diff -ruN a/drivers/gpu/drm/msm/msm_gpu.c b/drivers/gpu/drm/msm/msm_gpu.c
+--- a/drivers/gpu/drm/msm/msm_gpu.c	2026-09-20 08:25:16.421369699 +0100
++++ b/drivers/gpu/drm/msm/msm_gpu.c	2026-09-20 08:25:45.589247969 +0100
+@@ -503,6 +503,17 @@
+ 			round_jiffies_up(jiffies + msecs_to_jiffies(priv->hangcheck_period)));
+ }
+ 
++/*
++ * Look for a hang now rather than at the next tick, for hardware that reports
++ * a stall itself. The timer's own decision is unchanged: if work has retired
++ * or the command processor has moved on since the last look, nothing happens.
++ */
++void msm_gpu_hangcheck_soon(struct msm_gpu *gpu)
++{
++	if (timer_pending(&gpu->hangcheck_timer))
++		mod_timer(&gpu->hangcheck_timer, jiffies + msecs_to_jiffies(20));
++}
++
+ static bool made_progress(struct msm_gpu *gpu, struct msm_ringbuffer *ring)
+ {
+ 	if (ring->hangcheck_progress_retries >= DRM_MSM_HANGCHECK_PROGRESS_RETRIES)
+diff -ruN a/drivers/gpu/drm/msm/msm_gpu.h b/drivers/gpu/drm/msm/msm_gpu.h
+--- a/drivers/gpu/drm/msm/msm_gpu.h	2026-09-20 08:25:17.293369845 +0100
++++ b/drivers/gpu/drm/msm/msm_gpu.h	2026-09-20 08:25:45.589488977 +0100
+@@ -650,6 +650,7 @@
+ 		uint32_t *totaltime, uint32_t ncntrs, uint32_t *cntrs);
+ 
+ void msm_gpu_retire(struct msm_gpu *gpu);
++void msm_gpu_hangcheck_soon(struct msm_gpu *gpu);
+ void msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit);
+ 
+ int msm_gpu_init(struct drm_device *drm, struct platform_device *pdev,
