@@ -54,7 +54,7 @@ the others listed there.
 | Wi-Fi | Working | Broadcom brcmfmac over SDIO, in-tree driver |
 | FDE | Not tested | The test install is unencrypted |
 | Battery | Working | Percentage from VADC VBAT_SNS and an OCV table; charging limits are Sony's Z2 values. `drivers/battery/` |
-| 3D | Partly working | Adreno 330 through freedreno runs the compositor and, since 2026-09-20, applications too (`/etc/sirius-renderer`). It gives full OpenGL ES 3.0 on mesa 26.2.2 and glmark2 runs every scene clean. **What stalls it is now known: drawing the scrolled-window overshoot glow.** Six alternating runs of the same touch-scrolling test gave 11 to 22 hardware faults on every baseline and exactly zero with the glow switched off. Still needs a VRAM carveout, because the GPU has no IOMMU in mainline. `drivers/gpu/`, `docs/known-problems.md` |
+| 3D | Partly working | Adreno 330 through freedreno runs the compositor and, since 2026-09-20, applications too (`/etc/sirius-renderer`). It gives full OpenGL ES 3.0 on mesa 26.2.2 and glmark2 runs every scene clean. **The stall is narrowed but not solved.** In a controlled touch-scrolling test, drawing the scrolled-window overshoot glow accounts for all of it: six alternating runs gave 11 to 22 hardware faults on every baseline and exactly zero with the glow switched off. That is a trigger rather than the cause -- suppressing the glow session-wide does not stop Contacts corrupting, which stalls on a different draw. What the three GPU state captures share is the shape: the command processor stops in vertex fetch setup in front of an instanced draw with many fetch streams (nine or thirteen), never one with few. Still needs a VRAM carveout, because the GPU has no IOMMU in mainline. `drivers/gpu/`, `docs/known-problems.md` |
 | IMU | Working | Accelerometer, gyroscope, magnetometer and barometer all read. Light and proximity are an APDS-9930 and both work. Part by part in the table below |
 | Audio | Mostly working | Speakers, earpiece, headphones and the handset microphone all work, and call audio works in the downlink direction only, and the radio app can switch between speaker, headphones and Bluetooth. Speakers are QDSP6 to Quaternary MI2S to two TFA9890 amplifiers; the earpiece is the top TFA9890. Headphones and microphones are a WCD9320 codec on SLIMbus with its 9.6 MHz master clock from the PM8941 divider on PMIC GPIO 15. Roughly every other capture returns silence, and the secondary microphone is not reading yet. `drivers/audio/wcd9320/`, `drivers/clk/pmic-clkdiv/` |
 | Bluetooth | Working | Broadcom BCM4335C0 over UART, in-tree driver |
@@ -106,11 +106,12 @@ from the device on 2026-09-19.
 | V4L2 media core | | Working | `mc`, `videodev` and the `videobuf2` set built out of tree and loaded. No `/dev/video*` yet: nothing registers one |
 
 Read `docs/known-problems.md` before relying on any of this. The one that
-matters most: the Adreno 330 stalls when an application draws the
-scrolled-window overshoot glow, the rubber-band effect at the end of a list.
-That was narrowed to a single drawing operation on 2026-09-20 and is not yet
-fixed; until it is, a list that a finger pushes past its end will stall the
-GPU. The separate fault that used to deadlock the compositor -- the GEM
+matters most: the Adreno 330 stalls on some of what GTK draws, and an
+application can come up with most of its window missing. Work on 2026-09-20
+narrowed it to instanced draws that use many vertex fetch streams; the
+scrolled-window overshoot glow is one such draw and accounts for every fault
+in a controlled test, but suppressing it does not stop other applications
+corrupting. Not yet fixed. The separate fault that used to deadlock the compositor -- the GEM
 shrinker dereferencing a null file on carveout backed objects -- is fixed by
 `drivers/gpu/0022` and `0023`.
 
