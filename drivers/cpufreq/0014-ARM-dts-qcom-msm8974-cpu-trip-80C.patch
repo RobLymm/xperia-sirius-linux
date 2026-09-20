@@ -1,0 +1,62 @@
+From: Sirius port
+Subject: [PATCH 14/14] ARM: dts: qcom: msm8974: throttle the CPUs at 80 C, as Sony does
+
+The four CPU thermal zones carry a 75 C passive trip inherited from the SoC
+tree. With cpufreq cooling bound to them (patch 12) that trip decides how
+fast the phone runs under load, and 75 C is reached within seconds of a
+single core at 2150 MHz (tsens on a Xperia Z2: 67 -> 78 C in five seconds
+under a matrix-multiply load), after which the governor drops the clock by
+several steps.
+
+Sony's factory thermal policy for this phone (qcom,msm-thermal in the stock
+device tree) throttles at 80 C with 10 C hysteresis, unplugs cores at 85 C
+and resets the chip at 115 C. Move the passive trip to 80 C with 5 C
+hysteresis. The 110 C critical trip is unchanged and still sits below
+Sony's reset point.
+
+--- a/arch/arm/boot/dts/qcom/qcom-msm8974.dtsi
++++ b/arch/arm/boot/dts/qcom/qcom-msm8974.dtsi
+@@ -2368,8 +2368,8 @@
+ 
+ 			trips {
+ 				cpu_alert0: trip0 {
+-					temperature = <75000>;
+-					hysteresis = <2000>;
++					temperature = <80000>;
++					hysteresis = <5000>;
+ 					type = "passive";
+ 				};
+ 				cpu_crit0: trip1 {
+@@ -2395,8 +2395,8 @@
+ 
+ 			trips {
+ 				cpu_alert1: trip0 {
+-					temperature = <75000>;
+-					hysteresis = <2000>;
++					temperature = <80000>;
++					hysteresis = <5000>;
+ 					type = "passive";
+ 				};
+ 				cpu_crit1: trip1 {
+@@ -2422,8 +2422,8 @@
+ 
+ 			trips {
+ 				cpu_alert2: trip0 {
+-					temperature = <75000>;
+-					hysteresis = <2000>;
++					temperature = <80000>;
++					hysteresis = <5000>;
+ 					type = "passive";
+ 				};
+ 				cpu_crit2: trip1 {
+@@ -2449,8 +2449,8 @@
+ 
+ 			trips {
+ 				cpu_alert3: trip0 {
+-					temperature = <75000>;
+-					hysteresis = <2000>;
++					temperature = <80000>;
++					hysteresis = <5000>;
+ 					type = "passive";
+ 				};
+ 				cpu_crit3: trip1 {

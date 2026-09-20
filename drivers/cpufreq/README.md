@@ -46,8 +46,30 @@ primary mux.
 
 **`0013-soc-qcom-spm-msm8974-l2-saw-cpu-supply.patch`** — the supply.
 
-**`krait-l2-cache.c`** — L2 cache rate scaling, separate from the CPU OPPs
-and not wired into the patches above.
+**`krait-l2-cache.c`** — L2 cache rate scaling, separate from the CPU OPPs,
+with **`0015-soc-qcom-add-krait-l2-cache-scaling.patch`** as its kernel patch
+and **`krait-l2-node.dtsi-fragment`** plus
+**`0016-ARM-dts-qcom-msm8974-krait-l2-scaling.patch`** for the device tree
+side. The L2 voltage corners come from Sony's `qcom,l2-fmax`: up to 576 MHz at
+SVS_SOC, 1036.8 MHz at NORMAL, 1728 MHz at SUPER_TURBO.
+
+**`0014-ARM-dts-qcom-msm8974-cpu-trip-80C.patch`** — the CPU thermal trip.
+80 °C was chosen here independently, and Sony's `qcom,msm-thermal` node picks
+the same figure. What Sony also does and this does not is act on it: throttle
+to 422.4 MHz on cores 0 and 3, and take cores 1 and 2 offline at 85 °C. See
+`../../docs/whats-left.md`.
+
+**`qcom-msm8974-krait-opp.dtsi`** — the OPP table itself, and
+**`gen-krait-opp.py`**, which generates it from the stock device tree on the
+device. The table is not hand-written and should not be hand-edited;
+regenerate it with a different `--cap-hz` instead.
+
+Its values have been checked against Sony's published kernel, which is an
+independent copy of the same data: **1,535 frequency/voltage pairs across 55
+tables, with no difference**, including every table carrying the 2265.6 MHz
+entry this phone runs at. That is the part where an undervolt would matter and
+would not show up immediately. `../../docs/sony-source-audit.md` has the
+method.
 
 ## The supply is not what the state table used to say
 

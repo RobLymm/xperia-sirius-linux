@@ -1,0 +1,85 @@
+
+	/*
+	 * The L2 cache clock follows the fastest core, as in Qualcomm's
+	 * msm-cpufreq table for this SoC (second column of qcom,cpufreq-table
+	 * in Sony's Xperia Z2 tree). The cache sits on the CX rail; each rate's
+	 * corner comes from qcom,l2-fmax in the same tree: up to 576 MHz at
+	 * SVS_SOC, up to 1036.8 MHz at NORMAL, up to 1728 MHz at SUPER_TURBO.
+	 */
+	l2-cache-scaling {
+		compatible = "qcom,msm8974-krait-l2";
+		clocks = <&kraitcc 4>;
+		clock-names = "l2";
+		power-domains = <&rpmpd MSM8974_VDDCX_AO>;
+		operating-points-v2 = <&l2_opp_table>;
+		qcom,cpu-l2-khz = <300000 300000>,
+				  <422400 422400>,
+				  <652800 499200>,
+				  <729600 576000>,
+				  <960000 960000>,
+				  <1036800 1036800>,
+				  <1267200 1267200>,
+				  <1497600 1497600>,
+				  <1574400 1574400>,
+				  <1728000 1651200>,
+				  <1958400 1728000>;
+
+		l2_opp_table: opp-table {
+			compatible = "operating-points-v2";
+
+			opp-300000000 {
+				opp-hz = /bits/ 64 <300000000>;
+				required-opps = <&rpmpd_opp_svs_soc>;
+			};
+
+			opp-422400000 {
+				opp-hz = /bits/ 64 <422400000>;
+				required-opps = <&rpmpd_opp_svs_soc>;
+			};
+
+			opp-499200000 {
+				opp-hz = /bits/ 64 <499200000>;
+				required-opps = <&rpmpd_opp_svs_soc>;
+			};
+
+			opp-576000000 {
+				opp-hz = /bits/ 64 <576000000>;
+				required-opps = <&rpmpd_opp_svs_soc>;
+			};
+
+			opp-960000000 {
+				opp-hz = /bits/ 64 <960000000>;
+				required-opps = <&rpmpd_opp_nom>;
+			};
+
+			opp-1036800000 {
+				opp-hz = /bits/ 64 <1036800000>;
+				required-opps = <&rpmpd_opp_nom>;
+			};
+
+			opp-1267200000 {
+				opp-hz = /bits/ 64 <1267200000>;
+				required-opps = <&rpmpd_opp_super_turbo>;
+			};
+
+			opp-1497600000 {
+				opp-hz = /bits/ 64 <1497600000>;
+				required-opps = <&rpmpd_opp_super_turbo>;
+			};
+
+			opp-1574400000 {
+				opp-hz = /bits/ 64 <1574400000>;
+				required-opps = <&rpmpd_opp_super_turbo>;
+			};
+
+			opp-1651200000 {
+				opp-hz = /bits/ 64 <1651200000>;
+				required-opps = <&rpmpd_opp_super_turbo>;
+			};
+
+			opp-1728000000 {
+				opp-hz = /bits/ 64 <1728000000>;
+				required-opps = <&rpmpd_opp_super_turbo>;
+			};
+		};
+	};
