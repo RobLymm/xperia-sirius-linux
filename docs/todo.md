@@ -104,21 +104,67 @@ camera.** What is left is the rear sensor, and quality.
       and the flash. Same method as the front, larger: 20.7 MP over four
       lanes. **Harder than the front was**, because no equivalent of Intel's
       atomisp tables has been found for this part, and the vendor MIPI
-      registers cannot be read out of a sensor that is not streaming. Start by
-      looking for an IMX200 or IMX220 table anywhere at all.
+      registers cannot be read out of a sensor that is not streaming.
+
+      Searched on 2026-09-21, and there is **no prior art at all**:
+
+      - Sony's own released kernel driver is
+        `drivers/media/platform/msm/camera_v2/sensor/sony_camera_v4l2.c`, and
+        it contains no register tables. It reads `i2c_addr`, the power
+        sequence and module names from the device tree and the rest from the
+        module EEPROM at runtime, so the sequences are not in any GPL source.
+      - There is **no `libchromatix_imx200`** on the stock partition. The rear
+        camera goes through Sony's own ISP path, not Qualcomm's — only
+        `vendor/camera/SOI20BS0_IMX200.dat` (34460 bytes, same header format
+        as the front: I2C `0x10`, model `0x0200`), whose body is not a
+        register table in any obvious encoding.
+      - Nothing in mainline, nothing on GitHub, nothing in libcamera.
+
+      So the register sequences exist only inside Sony's closed camera stack.
+      Writing this driver means extracting them from those blobs, which is a
+      much larger job than the front sensor was. Worth agreeing it is wanted
+      before starting.
 - [x] **Stage 6** — the camera app. **Snapshot takes a photo**, 1920x1080
       JPEG into `~/Pictures/Camera/`. Two things were needed beyond the
       driver: pipewire runs libcamera itself and needs
       `LIBCAMERA_SOFTISP_MODE=cpu` in *its* environment, which
       `/etc/environment.d` cannot give an already-running user manager —
       hence `../userspace/pipewire.service.d/`.
-- [ ] **Quality.** Colour is poor and the frame rate low. No libcamera tuning
-      file exists for the IMX132 and it has no entry in libcamera's sensor
-      properties database, so there is no white balance or colour matrix;
-      writing one and sending it upstream is the fix. The frame rate is low
-      because the debayer runs on the CPU — libcamera's EGL debayer fails
-      every frame on this Adreno, which is probably the same fault that makes
-      `/etc/sirius-renderer` need cairo.
+- [ ] **Quality.** Three faults, all still open as of 2026-09-21, reported by
+      Rob after the pkgrel 18 flash. **The prior art for all of this is on the
+      stock system partition** — mount it and look there first:
+
+      | where | what |
+      |---|---|
+      | `vendor/lib/libchromatix_imx132_{common,preview,snapshot,default_video,liveshot}.so` | Qualcomm chromatix tuning for this exact sensor, ~35 KB each, one static struct behind `load_chromatix()`. This is the colour calibration. Needs the `chromatix.h` struct layout from Code Aurora's msm8974 sources, matched to the right version |
+      | `vendor/camera/SEM02BN1/color_ctrl.dat` | Sony's own colour data for this unit's front module, 4140 bytes, `excal` magic, fixed-point. A *different* format, feeding Sony's ISP rather than Qualcomm's — all three module directories differ, so it is genuinely per-module |
+      | `vendor/camera/SEM02BN1_IMX132.dat` | header decoded: u16@0 file size, u16@8 I2C address `0x36`, u16@10 model `0x0132` |
+
+      - [ ] **Rotation is wrong, and now wrong the other way.** The preview was
+            on its side; `sensor-nodes.dtsi` now sets `rotation = <270>` from
+            Sony's `qcom,mount-angle`, and it comes out **upside down**, which
+            is 180 degrees from right. So the value wanted is **90**, not 270 —
+            Sony's mount angle and the V4L2 `rotation` property evidently do
+            not share a sign convention. Change it, rebuild the board device
+            tree, reflash, and check before believing it.
+      - [ ] **Colour is still bad.** Expected: there is still no
+            `imx132.yaml`, so libcamera falls back to `uncalibrated.yaml`,
+            which has the `Ccm` algorithm commented out — no colour matrix at
+            all. libcamera also has no entry for the IMX132 in its sensor
+            properties database or its `CameraSensorHelper`, so it logs
+            "Failed to create camera sensor helper" and the gain model is
+            wrong too. Model a tuning file on the Sony sensors libcamera
+            already ships (`imx363.yaml` and friends in
+            `/usr/share/libcamera/ipa/simple/`).
+      - [ ] **Frame rate is still low, and lower than the CPU debayer was.**
+            Measured with `cam` the GPU debayer sustains 56.8 fps against the
+            CPU path's 13.3, and the drop-ins were switched to
+            `LIBCAMERA_SOFTISP_MODE=gpu` on that evidence — but the camera app
+            goes through the pipewire portal, not `cam`, and Rob reports it is
+            now *worse* than before. So measure the app path rather than `cam`:
+            confirm the portal's libcamera actually has the gpu setting, and
+            whether the cost is the "Importing input DMABuf failed, falling
+            back to upload" copy that `cam` also logs.
 
 **Done when** a still is captured from each camera and a video is recorded
 from the rear one. Half of that is done: the front camera works end to end.
