@@ -121,9 +121,37 @@ camera.** What is left is the rear sensor, and quality.
       - Nothing in mainline, nothing on GitHub, nothing in libcamera.
 
       So the register sequences exist only inside Sony's closed camera stack.
-      Writing this driver means extracting them from those blobs, which is a
-      much larger job than the front sensor was. Worth agreeing it is wanted
-      before starting.
+
+      **Searched further on 2026-09-21, and there is now a named target.**
+      `/system/lib/libcammw.so` (253 KB, Sony's camera middleware) exports
+      **`imx200_get_sensor_param`**, and knows IMX132, IMX134, IMX135 and
+      IMX200. That is the place to look. Ruled out along the way, so nobody
+      repeats the search:
+
+      - `libmmcamera2_sensor_modules.so` (Qualcomm's sensor modules, 139 KB)
+        knows imx132, imx134, imx135, imx214 and the generic `sony_camera_0`
+        and `sony_camera_1` -- but **not** imx200.
+      - `SOI20BS0_IMX200.dat` is not a register table in any encoding. Tested
+        by taking the 66 vendor-init register/value pairs the front sensor is
+        known to need and looking for them in `SEM02BN1_IMX132.dat`, whose
+        sensor those pairs belong to: 25 of 66 addresses appear as bare 16-bit
+        words and only 9 as address+value, which is coincidence rate for a
+        5.8 KB file. If the format held register tables the front file would
+        have matched almost all of them.
+      - Sony's own kernel driver, `sony_camera_v4l2.c`, has no tables.
+
+      For the driver skeleton, the closest mainline Sony sensors in the modern
+      `v4l2-cci` style are `imx214.c` (1404 lines) and `imx258.c` (1563); our
+      `imx132.c` was built from `imx219.c` the same way. There is no mainline
+      driver for imx135, imx220 or imx230.
+
+      A caution against assuming near neighbours are close enough: the front
+      sensor's README records that an imx219's MIPI registers did **not**
+      work on the IMX132 -- "this part has no 0x0114 lane mode, no 0x0128
+      D-PHY control and no 0x012a input clock register: writes are accepted
+      and discarded". The SMIA standard registers (mode, PLL, crop, exposure,
+      gain) do transfer between Sony parts. The vendor 0x3xxx block does not,
+      and that is the half that decides whether the sensor streams.
 - [x] **Stage 6** — the camera app. **Snapshot takes a photo**, 1920x1080
       JPEG into `~/Pictures/Camera/`. Two things were needed beyond the
       driver: pipewire runs libcamera itself and needs
@@ -147,24 +175,48 @@ camera.** What is left is the rear sensor, and quality.
             Sony's mount angle and the V4L2 `rotation` property evidently do
             not share a sign convention. Change it, rebuild the board device
             tree, reflash, and check before believing it.
-      - [ ] **Colour is still bad.** Expected: there is still no
-            `imx132.yaml`, so libcamera falls back to `uncalibrated.yaml`,
-            which has the `Ccm` algorithm commented out — no colour matrix at
-            all. libcamera also has no entry for the IMX132 in its sensor
-            properties database or its `CameraSensorHelper`, so it logs
-            "Failed to create camera sensor helper" and the gain model is
-            wrong too. Model a tuning file on the Sony sensors libcamera
-            already ships (`imx363.yaml` and friends in
-            `/usr/share/libcamera/ipa/simple/`).
-      - [ ] **Frame rate is still low, and lower than the CPU debayer was.**
-            Measured with `cam` the GPU debayer sustains 56.8 fps against the
-            CPU path's 13.3, and the drop-ins were switched to
-            `LIBCAMERA_SOFTISP_MODE=gpu` on that evidence — but the camera app
-            goes through the pipewire portal, not `cam`, and Rob reports it is
-            now *worse* than before. So measure the app path rather than `cam`:
-            confirm the portal's libcamera actually has the gpu setting, and
-            whether the cost is the "Importing input DMABuf failed, falling
-            back to upload" copy that `cam` also logs.
+      - [ ] **Colour.** `userspace/libcamera/imx132.yaml` now exists and is
+            installed, with the colour matrices copied from `imx363.yaml` —
+            the same borrowing libcamera's own `imx371.yaml` does, and it
+            carries the comment saying so. It adds a little saturation. It is
+            a guess, not a measurement.
+
+            **Two things were checked first and are not wrong**, so nobody
+            re-checks them:
+
+            - *The Bayer phase is right.* The two green positions of the raw
+              frame read 275.5 and 276.7 — 1.2 counts apart. A wrong phase
+              would put red or blue in one of them and they would differ by
+              tens. No channel swap.
+            - *The black level is right.* The sensor's own SMIA
+              `data_pedestal` register (0x0008) reads `0x0040` = 64, which is
+              exactly what libcamera assumes (`blackLevel: 4096`, 64 scaled to
+              16 bits). Read over CCI while streaming; the model id at 0x0000
+              read `0x0132` in the same dump, so it was the right chip.
+
+            What is still missing is a *measured* matrix, and an entry in
+            libcamera's `CameraSensorHelper` — without one it logs "Failed to
+            create camera sensor helper for imx132" and AGC's gain model is
+            wrong, which affects exposure as well as colour. The measured
+            matrix is in `libchromatix_imx132_*.so`, above.
+      - [x] **Frame rate — fixed 2026-09-21, 4.1 fps to 50.9 fps.** The
+            setting was reaching `pipewire` and not `wireplumber`, and it is
+            **wireplumber** that runs libcamera for the camera portal. A
+            drop-in on `pipewire.service` alone changes nothing the app sees,
+            and `/etc/environment.d` only reaches processes started after the
+            user manager read it. `userspace/wireplumber.service.d/` fixes
+            that.
+
+            Measured in the app itself, from libcamera's own log line
+            (`journalctl --user -n 300 | grep "Debayer processed"`):
+
+                cpu   244209 us/frame    4.1 fps
+                gpu    19647 us/frame   50.9 fps
+
+            Do not benchmark this with `cam`. On an idle GPU `cam` flatters
+            the GPU path (56 against 8–14); under a synthetic GPU hammering it
+            flatters the CPU path (9.7 against 10.9). Neither is the app,
+            which is 12x faster on the GPU.
 
 **Done when** a still is captured from each camera and a video is recorded
 from the rear one. Half of that is done: the front camera works end to end.
