@@ -53,6 +53,55 @@ Confirm which renderer was actually created, rather than assuming:
 
     journalctl -b 0 -t phoc | grep -iE "Creating (GLES2|pixman) renderer"
 
+## Put the applications back on the GPU as well
+
+Moving the compositor to software is only half of it. Once it is there,
+applications should go **back** to `GSK_RENDERER=gl` -- `/etc/sirius-renderer`
+set to `gl` -- because that pairing does not fault, and leaving them on cairo
+costs something expensive that is easy to miss.
+
+With the application on the cairo renderer, GTK cannot use a GL texture, so
+every camera frame that arrives as a dmabuf gets imported into GL and then
+**downloaded back to the CPU**. Counted over 26 seconds of camera preview with
+`GDK_DEBUG=offload,dmabuf`:
+
+    app renderer    dmabuf imports    GPU->CPU downloads
+    cairo                       11                    22
+    opengl                       2                     0
+
+Each of those is a full 1920x1080 readback, per frame, and GPU readbacks are
+among the slowest things a GPU does. On the GL renderer they disappear
+entirely.
+
+So the configuration is: **compositor in software, applications on the GPU**,
+which is the opposite way round from the obvious choice, and the only one of
+the four combinations that is both stable and fast.
+
+## Eight hardware planes are still going unused
+
+The display controller has far more capability than any of this uses.
+`gpu-debug/drmplanes.c` asks the kernel what it exposes:
+
+    /dev/dri/card0: 8 planes
+    plane 35 primary, planes 41..77 overlay -- all 8 accept
+    NV12 NV21 NV16 NV61 VYUY UYVY YUYV YVYU YU12 YV12
+
+Eight planes, every one of them able to scan out YUV directly. MDP5 on this
+SoC has three VIG pipes with scaling and a colour space converter, three RGB
+and two DMA, feeding five layer mixers, and phoc's own log says `Found 8 DRM
+planes`. wlroots 0.20 has the output-layer support to drive them.
+
+So in principle the shell panel and an application could each sit on their own
+hardware plane, blended by the display controller, with **nothing** composited
+by either the GPU or the CPU -- and a camera preview could be scanned out as
+YUV with no conversion at all. None of that is happening today: GTK's graphics
+offload never engages, so the preview goes through the compositor like any
+other surface.
+
+That is the next thing worth chasing, and it would make both the GPU fault and
+the software compositing cost irrelevant rather than traded off against each
+other.
+
 ## This is a workaround, not a fix
 
 The bug is in the driver and it is being chased in `gpu-debug/BRIEF.md`. Two
