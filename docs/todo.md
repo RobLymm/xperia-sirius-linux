@@ -194,6 +194,25 @@ camera.** What is left is the rear sensor, and quality.
               16 bits). Read over CCI while streaming; the model id at 0x0000
               read `0x0132` in the same dump, so it was the right chip.
 
+            **The hardware ISP is not an option, checked 2026-09-21.** The
+            obvious way to make this fast and correct at once is to stop doing
+            the ISP in software and use the VFE's PIX path, which is what
+            Android did. Mainline camss cannot: of the three PIX format tables
+            (`formats_pix_8x16`, `_8x96`, `_845`) **none accepts a Bayer input
+            format** — they take YUV in and give NV12 out, so the PIX line is
+            a format converter and scaler, not a demosaicer. There is no
+            demosaic register programming anywhere in the driver, and only the
+            VFE 17x configuration even creates a PIX line (`line_num = 4`);
+            every VFE 4.1 SoC, ours included, sets 3. Qualcomm kept the VFE's
+            Bayer ISP in their proprietary stack and never upstreamed it, so
+            using it would mean reverse-engineering the demosaic, white
+            balance and colour correction register programming from scratch —
+            a project on the scale of the rear sensor driver, not a wiring-up
+            job.
+
+            So the software ISP is what there is, and the useful work is
+            making the path around it cheaper rather than replacing it.
+
             What is still missing is a *measured* matrix, and an entry in
             libcamera's `CameraSensorHelper` — without one it logs "Failed to
             create camera sensor helper for imx132" and AGC's gain model is
