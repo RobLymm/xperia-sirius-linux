@@ -2,25 +2,30 @@
 #
 # Tuning for the Sony IMX132, the front camera of the Xperia Z2.
 #
-# The colour matrices are copied from imx363.yaml. That is not a measurement
-# and it is not pretending to be one -- it is the same thing libcamera's own
-# imx371.yaml does, which carries the comment "copied from imx363.yaml". No
-# IMX132 tuning exists anywhere: the sensor has no entry in libcamera's tuning
-# set, its sensor properties database or its CameraSensorHelper.
+# **There is deliberately no Ccm here.** Copying imx363's matrices, which is
+# what libcamera's own imx371.yaml does, was tried on 2026-09-21 and made the
+# picture measurably worse: it roughly tripled the magenta cast in the
+# shadows. Measured as the 1st-percentile gap between channels on one scene,
+# same frame count, same light:
 #
-# Without this file libcamera falls back to uncalibrated.yaml, which has the
-# Ccm algorithm commented out entirely, so there is no colour correction at
-# all and the picture comes out green: measured on a daylight scene,
-# R/G = 0.885 and B/G = 0.913 where neutral is 1.000.
+#     imx363 matrices     R-G +31   B-G +23
+#     no Ccm              R-G +11   B-G  +8
+#
+# Borrowing a colour matrix from a different sensor is a guess about spectral
+# response, and this guess was wrong. Leave it out until there is a measured
+# one; the prior art for that is libchromatix_imx132_*.so on the stock system
+# partition. See ../../docs/todo.md.
+#
+# What this file is still for is the black level, which is worth stating
+# explicitly rather than letting the automatic estimator find it.
 #
 # blackLevel 4096 is the standard Sony 10-bit pedestal of 64 scaled to 16
-# bits, and is what imx355, imx363 and imx371 all use.
+# bits, and is what imx355, imx363 and imx371 all use. It is also what this
+# sensor's own SMIA data_pedestal register (0x0008) reads, checked over CCI,
+# and setting it explicitly measures the same as letting the estimator run --
+# so it is right, and it is not the cause of the washed-out look.
 #
-# The real fix is a measured matrix. The prior art for that is on the stock
-# system partition: vendor/lib/libchromatix_imx132_*.so is Qualcomm chromatix
-# tuning for this exact sensor, and reading it needs the chromatix.h struct
-# layout from Code Aurora's msm8974 sources. See docs/todo.md.
-#
+
 # Install as /usr/share/libcamera/ipa/simple/imx132.yaml
 %YAML 1.1
 ---
@@ -29,32 +34,6 @@ algorithms:
   - BlackLevel:
       blackLevel: 4096
   - Awb:
-  - Ccm:
-      ccms:
-        - ct: 2701
-          ccm: [ 1.66951, -0.35271, -0.31679,
-                -0.33594,  1.69731, -0.36137,
-                 0.07843, -1.25185,  2.17341 ]
-        - ct: 2789
-          ccm: [ 1.74401, -0.44379, -0.30022,
-                -0.33322,  1.69889, -0.36567,
-                 0.09074, -1.27168,  2.18093 ]
-        - ct: 3025
-          ccm: [ 1.71956, -0.37493, -0.34462,
-                -0.46994,  1.83453, -0.36459,
-                 0.01838, -1.03863,  2.02024 ]
-        - ct: 4021
-          ccm: [ 1.65286, -0.42348, -0.22938,
-                -0.34752,  1.63472, -0.28719,
-                -0.02119, -0.65164,  1.67283 ]
-        - ct: 4125
-          ccm: [ 1.89736, -0.65796, -0.23941,
-                -0.36603,  1.62015, -0.25412,
-                 0.01202, -0.66114,  1.64912 ]
-        - ct: 6521
-          ccm: [ 1.64464, -0.50901, -0.13564,
-                -0.28189,  1.73169, -0.44979,
-                -0.02601, -0.51457,  1.54058 ]
   - Adjust:
   - Agc:
 ...

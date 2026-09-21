@@ -32,18 +32,23 @@
 
 		/*
 		 * How the part is mounted, which is what tells an application
-		 * which way up the frames are. Sony's own tree gives this
-		 * sensor qcom,mount-angle = <270> and qcom,sensor-position =
-		 * <1>, front; the mainline properties are rotation in degrees
-		 * and orientation, where 0 is front.
+		 * which way up the frames are.
 		 *
-		 * Without them v4l2_fwnode_device_parse() creates no
-		 * V4L2_CID_CAMERA_ORIENTATION or _SENSOR_ROTATION control,
-		 * and libcamera says "Failed to retrieve the camera location"
-		 * and "Rotation control not available, default to 0 degrees",
-		 * then shows the preview on its side.
+		 * Without these v4l2_fwnode_device_parse() creates no
+		 * V4L2_CID_CAMERA_ORIENTATION or _SENSOR_ROTATION control, and
+		 * libcamera says "Failed to retrieve the camera location" and
+		 * "Rotation control not available, default to 0 degrees", then
+		 * shows the preview on its side.
+		 *
+		 * 90, not the 270 that Sony's own tree gives as
+		 * qcom,mount-angle. 270 was tried first, on the reasoning that
+		 * Sony knows how their own phone is built, and it came out
+		 * upside down -- 180 degrees from right, so the two do not
+		 * share a sign convention. Checked on the phone, not derived.
+		 * qcom,sensor-position = <1> does map to orientation = <0>,
+		 * front.
 		 */
-		rotation = <270>;
+		rotation = <90>;
 		orientation = <0>;
 
 		port {
