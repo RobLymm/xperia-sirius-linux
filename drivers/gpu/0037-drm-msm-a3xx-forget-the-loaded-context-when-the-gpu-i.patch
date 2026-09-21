@@ -1,0 +1,71 @@
+From: Rob Watson <rob@mediaeden.com>
+Subject: [PATCH] drm/msm/a3xx: forget the loaded context when the GPU is reset
+
+a3xx_submit() skips a submit's context-restore buffer when the context has
+not changed since the last submit:
+
+	case MSM_SUBMIT_CMD_CTX_RESTORE_BUF:
+		/* ignore if there has not been a ctx switch: */
+		if (ring->cur_ctx_seqno == submit->queue->ctx->seqno)
+			break;
+
+That is correct while the GPU keeps running, because the state the restore
+buffer would load is already in the hardware. It stops being correct the
+moment the GPU is reset: recovery takes the device through
+pm_runtime_get_sync(), which sets needs_hw_init, and hw_init() then brings the
+hardware back up with none of that state. ring->cur_ctx_seqno still names the
+context that was loaded before the reset, so the next submit from that same
+context skips the restore it now needs and runs against a GPU that has
+forgotten everything.
+
+a6xx clears it in its hw_init() for exactly this reason, and has since
+per-ringbuffer contexts were introduced:
+
+	for (i = 0; i < gpu->nr_rings; i++)
+		gpu->rb[i]->cur_ctx_seqno = 0;
+
+a3xx and a4xx never clear it anywhere.
+
+The bug needs two GPU clients to show itself. With one client the context
+never changes, so the restore is skipped on every submit regardless and the
+stale value costs nothing. With two -- a Wayland compositor and an
+application, which alternate submits -- the restore matters on every submit,
+and after the first recovery the wrong one is skipped.
+
+That matches what this phone does. An application rendering with GL alongside
+a GL compositor faults within seconds and the faults arrive in bursts; the
+same application against a compositor on its software renderer, so that only
+one process uses the GPU, runs indefinitely with none. Measured on an Xperia
+Z2 (MSM8974PRO-AB, Adreno 330):
+
+	compositor GLES2 + app cairo     faults 0
+	compositor GLES2 + app opengl    faults 3, then 4
+	compositor pixman + app opengl   faults 0, then 0
+
+This does not explain the first fault in a burst -- nothing has been reset at
+that point -- but it does explain why one fault turns into several, and why a
+GPU reset on this part so often takes the session with it.
+
+Signed-off-by: Rob Watson <rob@mediaeden.com>
+---
+ drivers/gpu/drm/msm/adreno/a3xx_gpu.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
+@@ -320,6 +320,15 @@
+ 	/* clear ME_HALT to start micro engine */
+ 	gpu_write(gpu, REG_AXXX_CP_ME_CNTL, 0);
+ 
++	/*
++	 * The hardware has just come up with no context loaded, so forget
++	 * whichever one a3xx_submit() last saw. Without this the next submit
++	 * from that context skips its restore buffer and runs against a GPU
++	 * that was reset out from under it.
++	 */
++	for (i = 0; i < gpu->nr_rings; i++)
++		gpu->rb[i]->cur_ctx_seqno = 0;
++
+ 	return a3xx_me_init(gpu) ? 0 : -EINVAL;
+ }
+ 
