@@ -2,30 +2,25 @@
 #
 # Tuning for the Sony IMX132, the front camera of the Xperia Z2.
 #
-# **There is deliberately no Ccm here.** Copying imx363's matrices, which is
-# what libcamera's own imx371.yaml does, was tried on 2026-09-21 and made the
-# picture measurably worse: it roughly tripled the magenta cast in the
-# shadows. Measured as the 1st-percentile gap between channels on one scene,
-# same frame count, same light:
+# The matrix here is NOT a colour correction matrix in the usual sense. It is
+# a diagonal white balance, applied through the Ccm algorithm because that is
+# the only per-channel control the simple IPA exposes.
 #
-#     imx363 matrices     R-G +31   B-G +23
-#     no Ccm              R-G +11   B-G  +8
+# It is here because libcamera's Awb is not correcting this sensor. Measured
+# on a white wall, taking the brightest fifth of the frame, the output came
+# out R/G = 0.807 and B/G = 0.865 -- green roughly 20% stronger than red,
+# which is the green cast in the preview. A working Awb would have pulled
+# those to 1.000 on its own.
 #
-# Borrowing a colour matrix from a different sensor is a guess about spectral
-# response, and this guess was wrong. Leave it out until there is a measured
-# one; the prior art for that is libchromatix_imx132_*.so on the stock system
-# partition. See ../../docs/todo.md.
+# So the diagonal is 1/0.807 and 1/0.865 for red and blue, green left alone.
+# This is a measurement of one scene under one light, so it is a fixed
+# correction and not a substitute for working white balance -- it will be
+# wrong under a different illuminant. It is a step towards a picture that
+# looks right while the real cause is found.
 #
-# What this file is still for is the black level, which is worth stating
-# explicitly rather than letting the automatic estimator find it.
+# blackLevel 4096 is the sensor's own SMIA data_pedestal (0x0008 reads 64,
+# scaled to 16 bits), checked over CCI.
 #
-# blackLevel 4096 is the standard Sony 10-bit pedestal of 64 scaled to 16
-# bits, and is what imx355, imx363 and imx371 all use. It is also what this
-# sensor's own SMIA data_pedestal register (0x0008) reads, checked over CCI,
-# and setting it explicitly measures the same as letting the estimator run --
-# so it is right, and it is not the cause of the washed-out look.
-#
-
 # Install as /usr/share/libcamera/ipa/simple/imx132.yaml
 %YAML 1.1
 ---
@@ -34,6 +29,12 @@ algorithms:
   - BlackLevel:
       blackLevel: 4096
   - Awb:
+  - Ccm:
+      ccms:
+        - ct: 5000
+          ccm: [ 1.170, 0.000, 0.000,
+                 0.000, 1.000, 0.000,
+                 0.000, 0.000, 1.064 ]
   - Adjust:
   - Agc:
 ...

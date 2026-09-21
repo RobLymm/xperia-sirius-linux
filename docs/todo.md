@@ -175,11 +175,30 @@ camera.** What is left is the rear sensor, and quality.
             Sony's mount angle and the V4L2 `rotation` property evidently do
             not share a sign convention. Change it, rebuild the board device
             tree, reflash, and check before believing it.
-      - [ ] **Colour.** `userspace/libcamera/imx132.yaml` now exists and is
-            installed, with the colour matrices copied from `imx363.yaml` —
-            the same borrowing libcamera's own `imx371.yaml` does, and it
-            carries the comment saying so. It adds a little saturation. It is
-            a guess, not a measurement.
+      - [ ] **Colour.** Two separate faults, and one is now corrected.
+
+            **The green cast was libcamera's Awb not working.** Measured on a
+            white wall, brightest fifth of the frame: the output came out
+            R/G = 0.807 and B/G = 0.865, green roughly 20% stronger than red.
+            A working Awb would have pulled both to 1.000 on its own.
+            `userspace/libcamera/imx132.yaml` now carries a **diagonal**
+            matrix through the `Ccm` algorithm — the only per-channel control
+            the simple IPA exposes — which brings it to R/G = 1.018,
+            B/G = 1.056. It is a fixed correction measured under one light and
+            will be wrong under another; the real fix is finding out why Awb
+            does nothing here.
+
+            **The low saturation still needs a measured matrix.** Copying
+            imx363's, which is what libcamera's own imx371.yaml does, was
+            tried and made it worse — it roughly tripled the magenta in the
+            shadows. The prior art is `libchromatix_imx132_*.so`.
+
+            A third thing may not be software at all: the picture is hazy and
+            low contrast, and the **raw** data has nothing darker than 92 of
+            1023 with the black level at 64. That is light scattered across
+            the whole sensor, which is a lens property. Worth testing on a
+            scene without a bright window behind the subject before spending
+            more time on it.
 
             **Two things were checked first and are not wrong**, so nobody
             re-checks them:
